@@ -48,3 +48,4 @@ coverage/
 *.key
 *.p12
 secrets/
+docs/
