@@ -49,3 +49,4 @@ coverage/
 *.p12
 secrets/
 docs/
+AGENTS.md
