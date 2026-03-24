@@ -81,6 +81,10 @@ export interface Attachment {
   type: string;
   size: number;
   url?: string;
+  storage_ref?: string;       // returned by /api/upload — identifies the document in the backend
+  uploading?: boolean;        // true while the file is being uploaded to the backend
+  upload_error?: string;      // set if upload failed
+  facts_summary?: string;     // short summary of client facts detected in the document
 }
 
 export interface Message {
@@ -106,6 +110,46 @@ export interface QuickPrompt {
   description: string;
   iconName: string;
   category: string;
+}
+
+// ---------------------------------------------------------------------------
+// SOA (Statement of Advice) types
+// ---------------------------------------------------------------------------
+
+export interface SOASection {
+  template_number: number;
+  template_name: string;
+  title: string;
+  our_recommendation: string;
+  why_appropriate: string;
+  what_to_consider: string;
+  more_information: string;
+}
+
+export interface SOAMissingQuestion {
+  id: string;
+  question: string;
+}
+
+export interface SOADraftPayload {
+  type: 'soa_draft';
+  sections: SOASection[];
+  missing_questions: SOAMissingQuestion[];
+}
+
+export interface SOAGenerateResponse {
+  sections: SOASection[];
+  missing_questions: SOAMissingQuestion[];
+}
+
+export interface ConversationDocument {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  facts_found: boolean;
+  facts_summary: string;
+  created_at: string;
 }
 
 export type BackendStatus = 'online' | 'offline' | 'connecting';

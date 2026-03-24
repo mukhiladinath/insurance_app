@@ -5,28 +5,48 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+const IST = 'Asia/Kolkata';
 
+/** Returns "YYYY-MM-DD" in IST for date comparison. */
+function istDateKey(date: Date): string {
+  return date.toLocaleDateString('en-CA', { timeZone: IST }); // en-CA gives YYYY-MM-DD
+}
+
+/**
+ * Format a timestamp relative to now, always in IST (UTC+5:30).
+ *  - Today     → "3:45 PM"
+ *  - Yesterday → "Yesterday"
+ *  - < 7 days  → "Mon" / "Tue" …
+ *  - Older     → "Mar 21"
+ */
 export function formatTimestamp(date: Date): string {
   const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const todayKey     = istDateKey(now);
+  const dateKey      = istDateKey(date);
 
-  if (days === 0) {
-    // Manual 12-hour format — consistent across server and browser
-    const h = date.getHours();
-    const m = date.getMinutes().toString().padStart(2, '0');
-    const hour12 = h % 12 || 12;
-    const period = h < 12 ? 'AM' : 'PM';
-    return `${hour12}:${m} ${period}`;
-  } else if (days === 1) {
-    return 'Yesterday';
-  } else if (days < 7) {
-    return WEEKDAYS[date.getDay()];
-  } else {
-    return `${MONTHS[date.getMonth()]} ${date.getDate()}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayKey = istDateKey(yesterday);
+
+  if (dateKey === todayKey) {
+    return date.toLocaleTimeString('en-IN', {
+      timeZone: IST,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
   }
+
+  if (dateKey === yesterdayKey) return 'Yesterday';
+
+  const diffMs   = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 7) {
+    return date.toLocaleDateString('en-IN', { timeZone: IST, weekday: 'short' });
+  }
+
+  return date.toLocaleDateString('en-IN', { timeZone: IST, day: 'numeric', month: 'short' });
 }
 
 export function formatFileSize(bytes: number): string {

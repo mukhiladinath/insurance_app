@@ -12,7 +12,7 @@
 | `tpd-cover-comparison.md` | Total & Permanent Disability | Client needs disability lump sum, can't work permanently |
 | `income-protection-comparison.md` | Income Protection (IP) | Client needs salary continuance during illness/injury |
 | `trauma-cover-comparison.md` | Trauma / Critical Illness | Client wants lump sum on cancer, heart attack, stroke etc. |
-| `super-fund-group-insurance.md` | Group / Super Fund Products | Client is asking about cover through their super fund |
+| `super-fund-insurance.md` | Group / Super Fund Products | Client is asking about cover through their super fund |
 
 ---
 

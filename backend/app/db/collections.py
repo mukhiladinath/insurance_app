@@ -20,6 +20,9 @@ MESSAGES = "messages"
 AGENT_RUNS = "agent_runs"
 TOOL_CALLS = "tool_calls"
 APP_CONFIG = "app_config"
+CONVERSATION_MEMORY = "conversation_memory"
+MEMORY_EVENTS = "memory_events"
+DOCUMENTS = "documents"          # uploaded document records + extracted content
 
 
 # -------------------------------------------------------------------------
@@ -53,5 +56,23 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db[TOOL_CALLS].create_index([("agent_run_id", ASCENDING)])
     await db[TOOL_CALLS].create_index([("conversation_id", ASCENDING)])
     await db[TOOL_CALLS].create_index([("tool_name", ASCENDING)])
+
+    # conversation_memory — unique per conversation, fast lookup
+    await db[CONVERSATION_MEMORY].create_index(
+        [("conversation_id", ASCENDING)], unique=True
+    )
+
+    # memory_events — ordered audit trail per conversation
+    await db[MEMORY_EVENTS].create_index(
+        [("conversation_id", ASCENDING), ("created_at", ASCENDING)]
+    )
+    await db[MEMORY_EVENTS].create_index([("event_type", ASCENDING)])
+
+    # documents — lookup by conversation and user; ordering by upload time
+    await db[DOCUMENTS].create_index(
+        [("conversation_id", ASCENDING), ("created_at", ASCENDING)]
+    )
+    await db[DOCUMENTS].create_index([("user_id", ASCENDING)])
+    await db[DOCUMENTS].create_index([("facts_merged", ASCENDING)])
 
     logger.info("MongoDB indexes ensured.")

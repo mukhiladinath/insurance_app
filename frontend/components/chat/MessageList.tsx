@@ -2,9 +2,8 @@
 
 import { useEffect, useRef } from 'react';
 import { useChatStore } from '@/store/chat-store';
-import { mockQuickPrompts } from '@/lib/mock-data';
 import { MessageBubble } from './MessageBubble';
-import { QuickPrompts } from './QuickPrompts';
+import { WelcomeScreen } from './WelcomeScreen';
 
 export function MessageList() {
   const { messages, isStreaming } = useChatStore();
@@ -19,8 +18,7 @@ export function MessageList() {
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50/50">
       <div className="mx-auto max-w-3xl py-4">
-        {/* Quick prompts shown when chat is empty */}
-        {isEmpty && <QuickPrompts prompts={mockQuickPrompts} />}
+        {isEmpty && <WelcomeScreen />}
 
         {/* Message thread */}
         {!isEmpty && (

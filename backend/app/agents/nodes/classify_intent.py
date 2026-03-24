@@ -104,6 +104,18 @@ _IP_COMPOUND_TRIGGERS = [
     "protection", "replace", "retain", "disability", "policy", "benefit", "claim",
 ]
 
+# Phrases that explicitly indicate standalone / outside-super IP intent.
+_IP_OUTSIDE_SUPER_PHRASES = [
+    "outside super",
+    "outside of super",
+    "outside superannuation",
+    "outside of superannuation",
+    "standalone ip",
+    "standalone income protection",
+    "retail ip",
+    "retail income protection",
+]
+
 _DIRECT_KEYWORDS = [
     "hello", "hi ", "thanks", "thank you", "what can you", "help me",
     "who are you", "what are you", "tell me about",
@@ -207,9 +219,106 @@ _TPD_IN_SUPER_COMPOUND_RIGHT = [
 ]
 
 
+def _extract_last_tool_from_context(recent_messages: list[dict]) -> str | None:
+    """
+    Scan recent messages (newest-first search) to find the last tool that was executed.
+    Returns the tool intent string, or None if no prior tool run is found.
+    We detect tool runs by looking for assistant messages that contain structured
+    tool output markers (the tool name appears in the payload) or by checking
+    that the prior user message triggered a tool intent in the conversation.
+    Heuristic: if the most recent assistant turn is long and contains insurance
+    analysis language (shortfall, placement, cover, recommendation), infer the
+    tool from keyword signals in that response.
+    """
+    # Work backwards through recent messages to find last assistant response
+    for msg in reversed(recent_messages):
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", "").lower()
+        # Map assistant response signals → tool that produced them
+        if any(kw in content for kw in ["salary continuance", "ip in super", "portability", "sps 250 ip"]):
+            return Intent.TOOL_IP_IN_SUPER
+        if any(kw in content for kw in ["income protection", "waiting period", "benefit period", "occupation definition"]):
+            return Intent.TOOL_INCOME_PROTECTION_POLICY
+        if any(kw in content for kw in ["tpd definition", "own occupation tpd", "any occupation tpd", "aal", "automatic acceptance limit", "asic rep 633"]):
+            return Intent.TOOL_TPD_POLICY_ASSESSMENT
+        if any(kw in content for kw in ["tpd in super", "group tpd", "tpd switch-off", "tpd inside super"]):
+            return Intent.TOOL_TPD_IN_SUPER
+        if any(kw in content for kw in ["trauma", "critical illness", "ci cover", "ci sum insured", "survival period"]):
+            return Intent.TOOL_TRAUMA_CI_POLICY
+        if any(kw in content for kw in [
+            "inside super", "outside super", "split strategy", "automatic acceptance", "pys",
+            "protecting your super", "placement recommendation", "australiansuper", "aware super",
+            "industry fund", "mysuper", "switch-off", "inactivity",
+        ]):
+            return Intent.TOOL_LIFE_INSURANCE_IN_SUPER
+        if any(kw in content for kw in ["life shortfall", "tpd shortfall", "retail life", "retail tpd", "underwriting risk", "life cover", "tpd cover"]):
+            return Intent.TOOL_LIFE_TPD_POLICY
+        # Only check the most recent assistant message
+        break
+    return None
+
+
+# Correction language patterns — if any of these appear with a numeric value,
+# the message is likely correcting a previously stated client fact.
+_CORRECTION_PATTERNS = [
+    "not ", "actually ", "correction:", "i meant", "it's not", "its not",
+    "should be", "the correct", "i was wrong", "let me correct",
+    "no wait", "sorry,", "my mistake", "i made an error",
+    "is not ", "isn't ", "was wrong",
+]
+
+_DATA_PATTERNS = [
+    "$", "dollars", "income", "salary", "super", "balance", "mortgage",
+    "premium", "cover", "insured", "age", "years", "children", "dependant",
+    "smoker", "occupation", "height", "weight", "tax rate", "marginal",
+    "annual", "monthly", "weekly",
+]
+
+
+def _is_data_correction(message: str) -> bool:
+    """
+    Return True if the message looks like a correction of a previously stated
+    client data value. Checks for both correction language AND data-related terms.
+    """
+    lower = message.lower()
+    has_correction_language = any(pat in lower for pat in _CORRECTION_PATTERNS)
+    has_data_term = any(pat in lower for pat in _DATA_PATTERNS)
+    has_number = any(c.isdigit() for c in message)
+    return has_correction_language and has_data_term and has_number
+
+
+_SOA_TRIGGERS: tuple[str, ...] = (
+    "generate soa",
+    "create soa",
+    "produce soa",
+    "draft soa",
+    "write soa",
+    "prepare soa",
+    "build soa",
+    "make the soa",
+    "generate the soa",
+    "create the soa",
+    "generate statement of advice",
+    "create statement of advice",
+    "produce statement of advice",
+    "draft statement of advice",
+    "write statement of advice",
+    "prepare statement of advice",
+    "soa document",
+    "generate my soa",
+    "create my soa",
+)
+
+
 def _classify_by_rules(message: str) -> str | None:
     """Apply deterministic keyword rules. Returns intent string or None."""
     lower = message.lower()
+
+    # SOA generation — check FIRST, before all other rules
+    if any(trigger in lower for trigger in _SOA_TRIGGERS):
+        from app.core.constants import Intent
+        return Intent.GENERATE_SOA
 
     # Pre-compute shared TPD and super signals (used across TIER 0 and TIER 0.5)
     _is_combined_life_tpd = "life insurance" in lower and "tpd" in lower
@@ -243,6 +352,14 @@ def _classify_by_rules(message: str) -> str | None:
             return Intent.TOOL_TPD_POLICY_ASSESSMENT
 
     # --- TIER 1: IP inside super (most specific — checked first) ---
+    # Guardrail: if the user explicitly asks for standalone / outside-super IP,
+    # do NOT route to the super IP tool just because "super" appears.
+    if (
+        any(phrase in lower for phrase in _IP_OUTSIDE_SUPER_PHRASES)
+        and any(left in lower for left in _IP_SUPER_COMPOUND_LEFT)
+    ):
+        return Intent.TOOL_INCOME_PROTECTION_POLICY
+
     if any(kw in lower for kw in _IP_IN_SUPER_KEYWORDS):
         return Intent.TOOL_IP_IN_SUPER
 
@@ -649,6 +766,34 @@ Omit fields that are not mentioned. Return only a JSON object.
 }
 
 
+def _merge_memory_into_tool_input(
+    tool_name: str,
+    client_memory: dict,
+    extracted: dict,
+) -> dict:
+    """
+    Blend structured memory (canonical baseline) with fresh LLM extraction (override).
+
+    Memory provides facts from older turns that fall outside the recent-message window.
+    The freshly extracted dict from the current turn takes precedence — so any
+    correction or update the user just made wins over the stored value.
+
+    Returns the merged dict. If memory has nothing relevant, returns extracted unchanged.
+    """
+    from app.services.memory_merge_service import build_tool_input_from_memory, deep_merge
+
+    if not client_memory:
+        return extracted or {}
+
+    memory_grounded = build_tool_input_from_memory(tool_name, client_memory)
+    if not memory_grounded:
+        return extracted or {}
+    if not extracted:
+        return memory_grounded
+
+    return deep_merge(memory_grounded, extracted)
+
+
 async def _extract_tool_inputs(
     tool_name: str, message: str, recent_messages: list[dict]
 ) -> dict:
@@ -720,6 +865,11 @@ Classify the user's message into exactly one of these intents:
 - "direct_response": general questions, greetings, clarifications not requiring a tool
 - "clarification_needed": message is too ambiguous to classify
 
+IMPORTANT: If the conversation context shows a tool was recently run AND the user is
+correcting or updating a client data value (income, age, super, mortgage, cover amount,
+etc.), classify as the SAME tool that was last run — the analysis must be re-executed
+with the corrected data. Do NOT classify data corrections as "direct_response".
+
 Respond with a JSON object only:
 {"intent": "<intent>", "selected_tool": "<tool_name or null>", "reasoning": "<one sentence>"}
 
@@ -776,12 +926,64 @@ async def classify_intent(state: AgentState) -> dict:
 
     message = state.get("user_message", "")
     recent = state.get("recent_messages", [])
+    client_memory: dict = state.get("client_memory") or {}
+
+    # --- Correction / data-update detection (runs BEFORE keyword rules) ---
+    # When the user corrects or updates a client fact, we want a short
+    # acknowledgement ("Got it, updated.") rather than a full tool re-run.
+    # Memory is updated by the update_memory node regardless of intent.
+    #
+    # Exception: if the message ALSO contains an explicit recalculation request
+    # ("recalculate", "redo the analysis", "update the analysis", "run again",
+    # "re-run", "recalculate"), we DO re-run the last tool with updated data.
+    _RERUN_TRIGGERS = [
+        "recalculate", "re-calculate", "redo", "re-run", "rerun",
+        "update the analysis", "run again", "run the analysis", "new analysis",
+        "updated analysis", "calculate again", "re-analyse", "reanalyse",
+    ]
+    if _is_data_correction(message) and recent:
+        lower_msg = message.lower()
+        wants_rerun = any(t in lower_msg for t in _RERUN_TRIGGERS)
+        if wants_rerun:
+            # If the user explicitly names a tool/topic in THIS message, prefer that.
+            explicit_intent = _classify_by_rules(message)
+            target_tool = (
+                explicit_intent
+                if explicit_intent in (
+                    Intent.TOOL_LIFE_INSURANCE_IN_SUPER,
+                    Intent.TOOL_LIFE_TPD_POLICY,
+                    Intent.TOOL_INCOME_PROTECTION_POLICY,
+                    Intent.TOOL_IP_IN_SUPER,
+                    Intent.TOOL_TRAUMA_CI_POLICY,
+                    Intent.TOOL_TPD_POLICY_ASSESSMENT,
+                    Intent.TOOL_TPD_IN_SUPER,
+                )
+                else _extract_last_tool_from_context(recent)
+            )
+            if target_tool:
+                logger.info("classify_intent: correction + re-run request — running tool '%s'", target_tool)
+                tool_input = await _extract_tool_inputs(target_tool, message, recent)
+                tool_input = _merge_memory_into_tool_input(target_tool, client_memory, tool_input)
+                return {
+                    "intent": target_tool,
+                    "selected_tool": target_tool,
+                    "extracted_tool_input": tool_input or None,
+                }
+        else:
+            # Pure data correction — acknowledge only, memory update handled downstream
+            logger.info("classify_intent: data correction detected — returning direct_response (acknowledgement)")
+            return {"intent": Intent.DIRECT_RESPONSE, "selected_tool": None, "extracted_tool_input": None}
 
     # Try rule-based classification first
     rule_intent = _classify_by_rules(message)
 
     if rule_intent and rule_intent == Intent.DIRECT_RESPONSE:
         return {"intent": Intent.DIRECT_RESPONSE, "selected_tool": None, "extracted_tool_input": None}
+
+    # SOA generation — bypass tool execution entirely, goes straight to compose_response
+    if rule_intent and rule_intent == Intent.GENERATE_SOA:
+        logger.info("classify_intent: SOA generation request detected")
+        return {"intent": Intent.GENERATE_SOA, "selected_tool": None, "extracted_tool_input": None}
 
     if rule_intent and rule_intent in (
         Intent.TOOL_LIFE_INSURANCE_IN_SUPER,
@@ -793,7 +995,10 @@ async def classify_intent(state: AgentState) -> dict:
         Intent.TOOL_TPD_IN_SUPER,
     ):
         logger.debug("classify_intent: rule match → %s", rule_intent)
+        # Extract from recent messages (existing behaviour, unchanged)
         tool_input = await _extract_tool_inputs(rule_intent, message, recent)
+        # Enrich with canonical memory: memory fills fields older than the recent window
+        tool_input = _merge_memory_into_tool_input(rule_intent, client_memory, tool_input)
         return {"intent": rule_intent, "selected_tool": rule_intent, "extracted_tool_input": tool_input or None}
 
     # Fall back to LLM
@@ -808,10 +1013,11 @@ async def classify_intent(state: AgentState) -> dict:
         selected_tool = None
         intent = Intent.DIRECT_RESPONSE
 
-    # Extract structured inputs when a tool is selected
+    # Extract structured inputs when a tool is selected, then blend with memory
     tool_input: dict | None = None
     if selected_tool:
         tool_input = await _extract_tool_inputs(selected_tool, message, recent) or None
+        tool_input = _merge_memory_into_tool_input(selected_tool, client_memory, tool_input or {}) or None
 
     return {
         "intent": intent,

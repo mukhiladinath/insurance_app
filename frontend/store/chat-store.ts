@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { Chat, Message, Attachment, WorkspaceStatus } from '@/lib/types';
+import { Chat, Message, Attachment, WorkspaceStatus, SOASection, SOAMissingQuestion, SOADraftPayload, ConversationDocument } from '@/lib/types';
 import * as api from '@/lib/api';
 import { generateId } from '@/lib/utils';
 
@@ -22,17 +22,42 @@ interface ChatStore {
   isLoadingChats: boolean;
   isLoadingMessages: boolean;
 
+  // — Sources panel state —
+  isSourcesPanelOpen: boolean;
+  conversationDocuments: ConversationDocument[];
+  isLoadingDocuments: boolean;
+
+  // — SOA panel state —
+  isSOAPanelOpen: boolean;
+  isSOAMaximized: boolean;
+  soaSections: SOASection[];
+  soaMissingQuestions: SOAMissingQuestion[];
+  isSOAGenerating: boolean;
+
   // — Actions —
   loadConversations: () => Promise<void>;
   setActiveChat: (id: string) => Promise<void>;
   sendMessage: (content: string, attachments?: Attachment[]) => Promise<void>;
   createNewChat: () => void;
+  deleteChat: (id: string) => Promise<void>;
   addPendingFile: (file: Attachment) => void;
+  uploadAndAddFile: (file: File) => Promise<void>;
   removePendingFile: (id: string) => void;
   clearPendingFiles: () => void;
   setSearchQuery: (query: string) => void;
   toggleSidebar: () => void;
   refreshWorkspaceStatus: () => Promise<void>;
+
+  // — Sources panel actions —
+  openSourcesPanel: () => Promise<void>;
+  closeSourcesPanel: () => void;
+
+  // — SOA panel actions —
+  openSOAPanel: (payload: SOADraftPayload) => void;
+  closeSOAPanel: () => void;
+  toggleSOAMaximize: () => void;
+  generateSOAForConversation: () => Promise<void>;
+  submitSOAAnswers: (answers: Record<string, string>) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +99,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   isLoadingChats: false,
   isLoadingMessages: false,
 
+  isSourcesPanelOpen: false,
+  conversationDocuments: [],
+  isLoadingDocuments: false,
+
+  isSOAPanelOpen: false,
+  isSOAMaximized: false,
+  soaSections: [],
+  soaMissingQuestions: [],
+  isSOAGenerating: false,
+
   // -------------------------------------------------------------------------
   // Load conversations list from backend
   // -------------------------------------------------------------------------
@@ -97,10 +132,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   // Select a conversation and load its messages
   // -------------------------------------------------------------------------
   setActiveChat: async (id) => {
-    set({ activeChatId: id, isLoadingMessages: true, messages: [] });
+    set({ activeChatId: id, isLoadingMessages: true, messages: [], isSOAPanelOpen: false, soaSections: [], soaMissingQuestions: [], isSourcesPanelOpen: false, conversationDocuments: [] });
     try {
-      const data = await api.getMessages(id);
-      set({ messages: data.map(toMessage), isLoadingMessages: false });
+      const [messages, soaDraft] = await Promise.allSettled([
+        api.getMessages(id),
+        api.getSOADraft(id),
+      ]);
+
+      set({ messages: messages.status === 'fulfilled' ? messages.value.map(toMessage) : [], isLoadingMessages: false });
+
+      if (soaDraft.status === 'fulfilled') {
+        get().openSOAPanel({ type: 'soa_draft', ...soaDraft.value });
+      }
     } catch {
       set({ isLoadingMessages: false });
     }
@@ -137,6 +180,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           filename: a.name,
           content_type: a.type,
           size_bytes: a.size,
+          storage_ref: a.storage_ref,
         })),
       });
 
@@ -150,6 +194,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           toMessage(response.assistant_message),
         ],
       }));
+
+      // Open SOA panel if this response contains a SOA draft
+      const payload = response.assistant_message.structured_payload;
+      if (payload && (payload as Record<string, unknown>)['type'] === 'soa_draft') {
+        get().openSOAPanel(payload as unknown as SOADraftPayload);
+      }
 
       // Upsert conversation in sidebar list (move to top with updated title)
       const updatedChat: Chat = {
@@ -190,11 +240,70 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({ activeChatId: null, messages: [], pendingFiles: [] });
   },
 
+  deleteChat: async (id) => {
+    // Optimistic: remove from UI immediately
+    set((state) => {
+      const remaining = state.chats.filter((c) => c.id !== id);
+      const wasActive = state.activeChatId === id;
+      return {
+        chats: remaining,
+        activeChatId: wasActive ? (remaining[0]?.id ?? null) : state.activeChatId,
+        messages: wasActive ? [] : state.messages,
+        isSOAPanelOpen: wasActive ? false : state.isSOAPanelOpen,
+        soaSections: wasActive ? [] : state.soaSections,
+        soaMissingQuestions: wasActive ? [] : state.soaMissingQuestions,
+      };
+    });
+    // Fire-and-forget backend delete — UI already updated
+    api.deleteConversation(id).catch(() => {/* non-fatal */});
+  },
+
   // -------------------------------------------------------------------------
   // File attachments
   // -------------------------------------------------------------------------
   addPendingFile: (file) =>
     set((state) => ({ pendingFiles: [...state.pendingFiles, file] })),
+
+  // Upload file to backend, track uploading state, store storage_ref on completion
+  uploadAndAddFile: async (file: File) => {
+    const tempId = generateId();
+
+    // Add file immediately with uploading=true so UI can show a spinner
+    const attachment: Attachment = {
+      id: tempId,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      uploading: true,
+    };
+    set((state) => ({ pendingFiles: [...state.pendingFiles, attachment] }));
+
+    try {
+      const result = await api.uploadFile(file, api.USER_ID, get().activeChatId);
+
+      // Update attachment with storage_ref and facts_summary
+      set((state) => ({
+        pendingFiles: state.pendingFiles.map((f) =>
+          f.id === tempId
+            ? {
+                ...f,
+                uploading: false,
+                storage_ref: result.storage_ref,
+                facts_summary: result.facts_found ? result.facts_summary : undefined,
+              }
+            : f,
+        ),
+      }));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      // Mark as error but keep in list so user can see and remove it
+      set((state) => ({
+        pendingFiles: state.pendingFiles.map((f) =>
+          f.id === tempId ? { ...f, uploading: false, upload_error: message } : f,
+        ),
+      }));
+    }
+  },
 
   removePendingFile: (id) =>
     set((state) => ({
@@ -210,6 +319,75 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   toggleSidebar: () =>
     set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+
+  // -------------------------------------------------------------------------
+  // SOA panel
+  // -------------------------------------------------------------------------
+  openSourcesPanel: async () => {
+    const conversationId = get().activeChatId;
+    if (!conversationId) {
+      set({ isSourcesPanelOpen: true, conversationDocuments: [], isLoadingDocuments: false });
+      return;
+    }
+    set({ isSourcesPanelOpen: true, isLoadingDocuments: true });
+    try {
+      const docs = await api.listDocuments(conversationId);
+      set({ conversationDocuments: docs, isLoadingDocuments: false });
+    } catch {
+      set({ isLoadingDocuments: false });
+    }
+  },
+
+  closeSourcesPanel: () => set({ isSourcesPanelOpen: false }),
+
+  openSOAPanel: (payload) => set({
+    isSOAPanelOpen: true,
+    soaSections: payload.sections,
+    soaMissingQuestions: payload.missing_questions,
+  }),
+
+  closeSOAPanel: () => set({ isSOAPanelOpen: false, isSOAMaximized: false }),
+
+  toggleSOAMaximize: () => set((state) => ({ isSOAMaximized: !state.isSOAMaximized })),
+
+  generateSOAForConversation: async () => {
+    const conversationId = get().activeChatId;
+    if (!conversationId) return;
+
+    // If sections are already loaded just show the panel — no need to regenerate
+    if (get().soaSections.length > 0) {
+      set({ isSOAPanelOpen: true });
+      return;
+    }
+
+    set({ isSOAGenerating: true, isSOAPanelOpen: true });
+    try {
+      const result = await api.generateSOA(conversationId);
+      set({
+        soaSections: result.sections,
+        soaMissingQuestions: result.missing_questions,
+        isSOAGenerating: false,
+      });
+    } catch {
+      set({ isSOAGenerating: false });
+    }
+  },
+
+  submitSOAAnswers: async (answers) => {
+    const conversationId = get().activeChatId;
+    if (!conversationId) return;
+    set({ isSOAGenerating: true });
+    try {
+      const result = await api.generateSOA(conversationId, answers);
+      set({
+        soaSections: result.sections,
+        soaMissingQuestions: result.missing_questions,
+        isSOAGenerating: false,
+      });
+    } catch {
+      set({ isSOAGenerating: false });
+    }
+  },
 
   // -------------------------------------------------------------------------
   // Workspace status — polls /api/health and /api/tools

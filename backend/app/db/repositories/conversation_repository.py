@@ -78,3 +78,8 @@ class ConversationRepository:
             {"_id": to_object_id(conversation_id)},
             {"$set": {"title": title, "updated_at": utc_now()}},
         )
+
+    async def delete(self, conversation_id: str) -> bool:
+        """Hard-delete a conversation. Returns True if a document was deleted."""
+        result = await self._col.delete_one({"_id": to_object_id(conversation_id)})
+        return result.deleted_count > 0

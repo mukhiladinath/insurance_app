@@ -11,3 +11,6 @@ langchain-core
 langchain-openai
 httpx
 python-multipart
+pdfplumber
+python-docx
+aiofiles

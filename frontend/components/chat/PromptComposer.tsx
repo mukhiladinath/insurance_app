@@ -1,10 +1,9 @@
 'use client';
 
 import { useRef, useState, useCallback, DragEvent, ChangeEvent, KeyboardEvent } from 'react';
-import { Paperclip, Send, X, FileText } from 'lucide-react';
+import { Paperclip, Send, X, FileText, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useChatStore } from '@/store/chat-store';
-import { generateId, formatFileSize, cn } from '@/lib/utils';
-import { Attachment } from '@/lib/types';
+import { formatFileSize, cn } from '@/lib/utils';
 import { UploadHint } from './UploadHint';
 
 const ACCEPTED_TYPES = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
@@ -17,7 +16,7 @@ export function PromptComposer() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const { sendMessage, pendingFiles, addPendingFile, removePendingFile, isStreaming } =
+  const { sendMessage, pendingFiles, uploadAndAddFile, removePendingFile, isStreaming } =
     useChatStore();
 
   const handleFiles = useCallback(
@@ -25,22 +24,20 @@ export function PromptComposer() {
       if (!files) return;
       Array.from(files).forEach((file) => {
         if (file.size > MAX_FILE_SIZE) return;
-        const attachment: Attachment = {
-          id: generateId(),
-          name: file.name,
-          type: file.type,
-          size: file.size,
-        };
-        addPendingFile(attachment);
+        // Upload immediately — uploadAndAddFile handles adding to pendingFiles
+        uploadAndAddFile(file);
       });
     },
-    [addPendingFile]
+    [uploadAndAddFile]
   );
+
+  // Prevent sending while any file is still uploading
+  const anyUploading = pendingFiles.some((f) => f.uploading);
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
     if (!trimmed && pendingFiles.length === 0) return;
-    if (isStreaming) return;
+    if (isStreaming || anyUploading) return;
 
     sendMessage(
       trimmed || '(Attached files)',
@@ -86,7 +83,7 @@ export function PromptComposer() {
     handleFiles(e.dataTransfer.files);
   };
 
-  const canSend = (value.trim().length > 0 || pendingFiles.length > 0) && !isStreaming;
+  const canSend = (value.trim().length > 0 || pendingFiles.length > 0) && !isStreaming && !anyUploading;
 
   return (
     <div
@@ -103,20 +100,58 @@ export function PromptComposer() {
 
         {/* File chips */}
         {pendingFiles.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-1.5">
             {pendingFiles.map((file) => (
               <div
                 key={file.id}
-                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs"
+                className={cn(
+                  'flex items-start gap-2 rounded-xl border px-3 py-1.5 text-xs',
+                  file.upload_error
+                    ? 'border-red-200 bg-red-50'
+                    : file.uploading
+                    ? 'border-indigo-200 bg-indigo-50'
+                    : 'border-slate-200 bg-slate-50'
+                )}
               >
-                <FileText size={12} className="text-indigo-500 shrink-0" />
-                <span className="max-w-[140px] truncate text-slate-700 font-medium">
-                  {file.name}
-                </span>
-                <span className="text-slate-400">{formatFileSize(file.size)}</span>
+                {/* Status icon */}
+                <div className="mt-0.5 shrink-0">
+                  {file.uploading ? (
+                    <Loader2 size={12} className="text-indigo-500 animate-spin" />
+                  ) : file.upload_error ? (
+                    <AlertCircle size={12} className="text-red-500" />
+                  ) : file.storage_ref ? (
+                    <CheckCircle2 size={12} className="text-emerald-500" />
+                  ) : (
+                    <FileText size={12} className="text-indigo-500" />
+                  )}
+                </div>
+
+                {/* File info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="max-w-[160px] truncate text-slate-700 font-medium">
+                      {file.name}
+                    </span>
+                    <span className="text-slate-400 shrink-0">{formatFileSize(file.size)}</span>
+                  </div>
+                  {file.uploading && (
+                    <p className="text-indigo-500 mt-0.5">Extracting text and client details…</p>
+                  )}
+                  {file.upload_error && (
+                    <p className="text-red-500 mt-0.5">{file.upload_error}</p>
+                  )}
+                  {file.facts_summary && !file.uploading && !file.upload_error && (
+                    <p className="text-emerald-700 mt-0.5 line-clamp-2">{file.facts_summary}</p>
+                  )}
+                  {file.storage_ref && !file.facts_summary && !file.uploading && (
+                    <p className="text-slate-400 mt-0.5">Ready — no client details detected</p>
+                  )}
+                </div>
+
+                {/* Remove button */}
                 <button
                   onClick={() => removePendingFile(file.id)}
-                  className="ml-0.5 text-slate-400 hover:text-red-500 transition-colors"
+                  className="shrink-0 text-slate-400 hover:text-red-500 transition-colors mt-0.5"
                 >
                   <X size={11} />
                 </button>

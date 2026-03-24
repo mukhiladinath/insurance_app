@@ -54,6 +54,7 @@ class Intent:
     TOOL_TPD_POLICY_ASSESSMENT = "tpd_policy_assessment"
     TOOL_TPD_IN_SUPER = "purchase_retain_tpd_in_super"
     CLARIFICATION_NEEDED = "clarification_needed"
+    GENERATE_SOA = "generate_soa"
 
 
 # -------------------------------------------------------------------------
@@ -75,3 +76,30 @@ class ToolName:
 class ConversationStatus:
     ACTIVE = "active"
     ARCHIVED = "archived"
+
+
+# -------------------------------------------------------------------------
+# Memory field statuses (stored in conversation_memory.field_meta)
+# -------------------------------------------------------------------------
+class MemoryFieldStatus:
+    CONFIRMED = "confirmed"    # explicitly stated, high confidence
+    TENTATIVE = "tentative"    # stated with uncertainty ("around", "about")
+    CLEARED   = "cleared"      # explicitly revoked by user
+
+
+# -------------------------------------------------------------------------
+# Memory event types (stored in memory_events collection)
+# -------------------------------------------------------------------------
+class MemoryEventType:
+    NEW_FACT    = "new_fact"    # first time this field was mentioned
+    UPDATE      = "update"      # value changed (plain update, no correction language)
+    CORRECTION  = "correction"  # explicit correction ("actually X, not Y")
+    UNCERTAIN   = "uncertain"   # stated with uncertainty qualifier
+    REVOKE      = "revoke"      # user explicitly revoked / asked to ignore
+
+
+# -------------------------------------------------------------------------
+# Memory confidence levels
+# -------------------------------------------------------------------------
+MEMORY_CONFIDENCE_CONFIRMED = 1.0
+MEMORY_CONFIDENCE_UNCERTAIN = 0.6

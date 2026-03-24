@@ -21,7 +21,7 @@ from app.core.config import get_settings
 from app.db import mongo
 from app.db.collections import ensure_indexes
 from app.agents.graph import get_graph
-from app.api.routes import health, chat, conversations, tools
+from app.api.routes import health, chat, conversations, tools, upload, soa
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,6 +90,8 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, prefix=prefix)
     app.include_router(conversations.router, prefix=prefix)
     app.include_router(tools.router, prefix=prefix)
+    app.include_router(upload.router, prefix=prefix)
+    app.include_router(soa.router, prefix=prefix)
 
     return app
 

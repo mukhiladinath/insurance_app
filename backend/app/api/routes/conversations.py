@@ -37,6 +37,74 @@ async def get_conversation(conversation_id: str):
     return conv
 
 
+@router.delete("/{conversation_id}", status_code=204)
+async def delete_conversation(conversation_id: str):
+    """Hard-delete a conversation and its messages."""
+    from app.db.collections import MESSAGES
+    db = get_db()
+    conv_repo = ConversationRepository(db)
+    deleted = await conv_repo.delete(conversation_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    # Also remove all messages belonging to this conversation
+    await db[MESSAGES].delete_many({"conversation_id": conversation_id})
+
+
+@router.get("/{conversation_id}/documents")
+async def list_documents(conversation_id: str):
+    """
+    List all uploaded documents for a conversation.
+
+    Returns documents linked to this conversation AND documents uploaded by the
+    same user that have no conversation_id yet (uploaded before the first message).
+    """
+    from app.db.repositories.document_repository import DocumentRepository
+    from app.db.repositories.conversation_repository import ConversationRepository
+    from pydantic import BaseModel
+    from datetime import datetime
+
+    class DocumentOut(BaseModel):
+        id: str
+        filename: str
+        content_type: str
+        size_bytes: int
+        facts_found: bool
+        facts_summary: str
+        created_at: datetime
+
+    db = get_db()
+    doc_repo = DocumentRepository(db)
+    conv_repo = ConversationRepository(db)
+
+    # Primary: documents explicitly linked to this conversation
+    linked = await doc_repo.list_by_conversation(conversation_id)
+    linked_ids = {d["id"] for d in linked}
+
+    # Fallback: documents with no conversation_id for this user
+    # (uploaded before the conversation was created, not yet linked by load_documents)
+    conv = await conv_repo.get_by_id(conversation_id)
+    unlinked = []
+    if conv:
+        unlinked = await doc_repo.list_unlinked_by_user(conv["user_id"])
+
+    all_docs = linked + [d for d in unlinked if d["id"] not in linked_ids]
+    all_docs.sort(key=lambda d: d.get("created_at") or datetime.min)
+
+    result = []
+    for d in all_docs:
+        facts = d.get("extracted_facts") or {}
+        result.append(DocumentOut(
+            id=d["id"],
+            filename=d.get("filename", "unknown"),
+            content_type=d.get("content_type", ""),
+            size_bytes=d.get("size_bytes", 0),
+            facts_found=bool(facts),
+            facts_summary=", ".join(facts.keys()) if facts else "No facts extracted",
+            created_at=d.get("created_at"),
+        ))
+    return result
+
+
 @router.get("/{conversation_id}/messages", response_model=list[MessageResponse])
 async def get_messages(
     conversation_id: str,

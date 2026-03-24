@@ -91,9 +91,13 @@ class ChatService:
             "conversation_id": conversation_id,
             "agent_run_id": agent_run_id,
             "user_message": req.message,
+            "user_message_id": user_msg["id"],   # needed by update_memory for field_meta
             "tool_hint": req.tool_hint,
             "tool_input_override": req.tool_input,
             "recent_messages": [],
+            "client_memory": {},
+            "attached_files": [f.model_dump() for f in req.attached_files],
+            "document_context": None,
             "tool_warnings": [],
             "errors": [],
         }

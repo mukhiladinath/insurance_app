@@ -185,7 +185,15 @@ You help advisers analyse insurance scenarios, interpret tool results, and commu
 Always be professional, precise, and grounded in the facts provided.
 Do NOT invent figures, legal rules, or outcomes. If uncertain, say so.
 Keep responses concise and well-structured.
-Use plain Australian English."""
+Use plain Australian English.
+
+When the user is correcting or updating a client detail (e.g. "John has 3 kids not 2",
+"his age is 46 not 42", "income is $160,000 not $140,000"), respond with a SHORT
+acknowledgement only — 1 to 3 sentences. Confirm exactly what was updated, then offer
+to recalculate the analysis if relevant. Do NOT repeat or re-summarise the full prior
+analysis. Example: "Got it — I've noted John has 3 children (ages 8, 11, and 12).
+Would you like me to recalculate the life insurance analysis with this updated information?"
+"""
 
 
 def _build_tool_summary_prompt(tool_name: str, tool_result: dict, user_message: str) -> str:
@@ -550,6 +558,31 @@ Use the regulatory_citations data in the result to populate it. Structure it as 
 Only include sub-headings that have content. Do NOT invent regulation references not in the data."""
 
 
+def _build_overseer_context(state) -> dict:
+    """
+    Extract overseer verdict fields from state into a single dict.
+    Returns safe defaults when the overseer has not run (direct-response path).
+    """
+    return {
+        "status":         state.get("overseer_status")        or "proceed",
+        "reason":         state.get("overseer_reason")        or "",
+        "caution_notes":  state.get("overseer_caution_notes") or [],
+        "question":       state.get("overseer_question"),
+        "missing_fields": state.get("overseer_missing_fields") or [],
+    }
+
+
+def _build_memory_context_note(client_memory: dict) -> str:
+    """
+    Build a short memory context note for the LLM system prompt.
+    Only included when a rolling summary exists (long conversations).
+    """
+    summary = (client_memory.get("summary_memory") or {}).get("text", "")
+    if not summary:
+        return ""
+    return f"\n\nClient session context (from structured memory):\n{summary}"
+
+
 async def compose_response(state: AgentState) -> dict:
     """Compose the final natural language response and structured payload."""
     intent = state.get("intent", Intent.DIRECT_RESPONSE)
@@ -558,22 +591,131 @@ async def compose_response(state: AgentState) -> dict:
     tool_error = state.get("tool_error")
     selected_tool = state.get("selected_tool")
     recent_messages = state.get("recent_messages", [])
+    client_memory: dict = state.get("client_memory") or {}
+    document_context: str | None = state.get("document_context")
 
     try:
         model = get_chat_model(temperature=0.3)
 
         from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
+        # Build system prompt — inject memory summary context for long conversations
+        memory_context = _build_memory_context_note(client_memory)
+        system_prompt = _SYSTEM_PROMPT + memory_context
+
         # Build message history for context
-        lc_messages = [SystemMessage(content=_SYSTEM_PROMPT)]
+        lc_messages = [SystemMessage(content=system_prompt)]
+
+        # Inject uploaded document text as a reference context block
+        if document_context:
+            lc_messages.append(SystemMessage(content=(
+                "UPLOADED DOCUMENT CONTENT (use this as a primary source for facts about the client):\n\n"
+                + document_context
+            )))
+
         for m in recent_messages[-6:]:  # last 6 messages for context
             if m["role"] == "user":
                 lc_messages.append(HumanMessage(content=m["content"]))
             elif m["role"] == "assistant":
                 lc_messages.append(AIMessage(content=m["content"]))
 
+        # Read overseer verdict (defaults to "proceed" on the direct-response path)
+        overseer = _build_overseer_context(state)
+        overseer_status = overseer["status"]
+
+        # ── SOA generation path ─────────────────────────────────────────────
+        if intent == Intent.GENERATE_SOA:
+            from app.services.soa_service import generate_soa as _generate_soa
+            soa_result = await _generate_soa(client_memory, recent_messages)
+
+            if "error" in soa_result:
+                final_text = (
+                    f"I wasn't able to generate the SOA — {soa_result['error']} "
+                    "Please try again or check that the conversation has sufficient client details."
+                )
+                return {"final_response": final_text, "structured_response_payload": None}
+
+            n_sections = len(soa_result.get("sections", []))
+            n_missing = len(soa_result.get("missing_questions", []))
+
+            if n_sections == 0:
+                final_text = (
+                    "I couldn't identify any insurance recommendations in this conversation to generate an SOA from. "
+                    "Please run an insurance analysis first (e.g. 'Analyse life cover for James'), then ask me to generate the SOA."
+                )
+                return {"final_response": final_text, "structured_response_payload": None}
+
+            if n_missing > 0:
+                final_text = (
+                    f"I've generated your SOA covering {n_sections} insurance section(s) — it's open in the panel on the right. "
+                    f"There are {n_missing} field(s) I couldn't fill automatically. "
+                    "Answer the questions shown in the panel to complete it, then edit freely in the editor."
+                )
+            else:
+                final_text = (
+                    f"Your SOA is ready in the panel on the right — {n_sections} insurance section(s) generated. "
+                    "Review and edit the content as needed."
+                )
+
+            payload = {
+                "type": "soa_draft",
+                "sections": soa_result.get("sections", []),
+                "missing_questions": soa_result.get("missing_questions", []),
+            }
+
+            # Persist draft to conversation so the panel can be restored on reload
+            try:
+                from app.db.mongo import get_db
+                from app.db.collections import CONVERSATIONS
+                from app.utils.ids import to_object_id
+                _db = get_db()
+                await _db[CONVERSATIONS].update_one(
+                    {"_id": to_object_id(state["conversation_id"])},
+                    {"$set": {"soa_draft": {
+                        "sections": payload["sections"],
+                        "missing_questions": payload["missing_questions"],
+                    }}},
+                )
+            except Exception as _save_exc:
+                logger.warning("Could not persist SOA draft from compose_response: %s", _save_exc)
+
+            return {
+                "final_response": final_text,
+                "structured_response_payload": payload,
+            }
+
         # Determine what to compose
-        if tool_error:
+        if overseer_status == "ask_user":
+            # Overseer determined critical data is missing — ask the user
+            question = overseer["question"] or "Could you please provide the missing client details so I can complete the analysis?"
+            missing = overseer["missing_fields"]
+            if missing:
+                missing_list = "\n".join(f"- {m['field']}: {m.get('description', '')}" for m in missing)
+                prompt = (
+                    f"The user asked: \"{user_message}\"\n\n"
+                    f"Before completing the analysis, you need additional information.\n"
+                    f"Missing details:\n{missing_list}\n\n"
+                    f"Ask the user for this information politely and concisely. "
+                    f"Suggested question: {question}"
+                )
+            else:
+                prompt = (
+                    f"The user asked: \"{user_message}\"\n\n"
+                    f"Ask the user: {question}"
+                )
+            lc_messages.append(HumanMessage(content=prompt))
+
+        elif overseer_status == "reset_context":
+            # Severe topic mismatch — acknowledge and reorient
+            prompt = (
+                f"The user asked: \"{user_message}\"\n\n"
+                f"The system detected that the question may not align with the previous analysis context. "
+                f"Acknowledge the user's question, and ask them to clarify what specific insurance scenario "
+                f"they would like to analyse so you can provide an accurate response."
+            )
+            lc_messages.append(HumanMessage(content=prompt))
+
+        elif tool_error:
             # Tool failed — acknowledge and ask for the specific data needed
             prompt = (
                 f"The user asked: \"{user_message}\"\n\n"
@@ -587,6 +729,15 @@ async def compose_response(state: AgentState) -> dict:
         elif tool_result and selected_tool:
             # Tool succeeded — summarise in natural language
             prompt = _build_tool_summary_prompt(selected_tool, tool_result, user_message)
+
+            # Append overseer caution notes when status is proceed_with_caution
+            if overseer_status == "proceed_with_caution" and overseer["caution_notes"]:
+                caution_text = "\n".join(f"- {n}" for n in overseer["caution_notes"])
+                prompt += (
+                    f"\n\nOVERSEER CAVEATS (mention these naturally in your response where relevant):\n"
+                    f"{caution_text}"
+                )
+
             # Inject provider knowledge base so the LLM can recommend specific products
             knowledge = _load_knowledge(selected_tool)
             if knowledge:
@@ -610,6 +761,11 @@ async def compose_response(state: AgentState) -> dict:
                 "tool_name": selected_tool,
                 "tool_result": tool_result,
                 "tool_warnings": state.get("tool_warnings", []),
+                "overseer": {
+                    "status":       overseer["status"],
+                    "reason":       overseer["reason"],
+                    "caution_notes": overseer["caution_notes"],
+                },
             }
 
         return {
