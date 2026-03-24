@@ -22,6 +22,17 @@ function renderContent(content: string) {
       continue;
     }
 
+    // Heading ### (must check before ## and #)
+    if (line.startsWith('### ')) {
+      elements.push(
+        <h4 key={i} className="font-semibold text-[12px] mt-2 mb-0.5 text-slate-700 uppercase tracking-wide">
+          {line.slice(4)}
+        </h4>
+      );
+      i++;
+      continue;
+    }
+
     // Heading ##
     if (line.startsWith('## ')) {
       elements.push(

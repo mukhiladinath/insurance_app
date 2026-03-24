@@ -177,18 +177,26 @@ def _validate(raw: dict) -> dict:
         errors.append({"field": "member.age", "message": "Member age or date of birth is required.", "category": "LEGAL"})
         questions.append({"id": "Q-001", "question": "What is the member's age or date of birth?", "category": "LEGAL", "blocking": True})
 
+    # Fund type is useful for under-25 MySuper checks but is NOT blocking for the
+    # broader adequacy and placement analysis — demote to a non-blocking warning.
     fund = raw.get("fund") or {}
     if not fund.get("fundType"):
-        errors.append({"field": "fund.fundType", "message": "Fund type is required.", "category": "LEGAL"})
-        questions.append({"id": "Q-002", "question": "What type of super fund does the member hold (MySuper, Choice, SMSF, etc.)?", "category": "LEGAL", "blocking": True})
+        warnings.append({"field": "fund.fundType", "message": "Fund type not provided — under-25 MySuper trigger check will be skipped."})
 
+    # Cover types: helpful but not blocking — default life cover is the common case.
     if not product.get("coverTypesPresent"):
-        warnings.append({"field": "product.coverTypesPresent", "message": "No cover types provided — permissibility check will be incomplete."})
-        questions.append({"id": "Q-003", "question": "What cover types are present on the policy (Death, TPD, IP)?", "category": "LEGAL", "blocking": False})
+        warnings.append({"field": "product.coverTypesPresent", "message": "No cover types provided — assuming default Death cover for permissibility check."})
+
+    # Advice-quality questions (non-blocking) — focused on needs analysis gaps
+    if member.get("annualIncome") is None:
+        questions.append({"id": "Q-010", "question": "What level of income replacement would John want to provide for his family (e.g. 10–15 years of income)?", "category": "NEEDS_ANALYSIS", "blocking": False})
 
     advice_ctx = raw.get("adviceContext") or {}
-    if advice_ctx.get("estimatedAnnualPremium") is None:
-        questions.append({"id": "Q-004", "question": "What is the estimated annual insurance premium?", "category": "AFFORDABILITY", "blocking": False})
+    if advice_ctx.get("yearsToRetirement") is None and member.get("age") is None:
+        questions.append({"id": "Q-011", "question": "How many years until John plans to retire?", "category": "NEEDS_ANALYSIS", "blocking": False})
+
+    questions.append({"id": "Q-012", "question": "Does John have any significant liquid assets or savings outside super that could offset the insurance need?", "category": "NEEDS_ANALYSIS", "blocking": False})
+    questions.append({"id": "Q-013", "question": "Is John open to holding part of his life insurance outside super for greater flexibility (split strategy)?", "category": "STRATEGY", "blocking": False})
 
     is_valid = len(errors) == 0
     return {"isValid": is_valid, "errors": errors, "warnings": warnings, "missingInfoQuestions": questions}
@@ -230,7 +238,22 @@ def _eval_inactivity(inp: dict) -> dict:
 
 
 def _eval_low_balance(inp: dict) -> dict:
-    balance = inp["account_balance"] or 0
+    raw_balance = inp["account_balance"]
+    # If balance was not provided, do NOT trigger — assume balance is adequate.
+    # Triggering on missing data would produce false alerts (e.g. a member with $180k
+    # balance where the balance simply wasn't extracted).
+    if raw_balance is None:
+        return {
+            "trigger": "LOW_BALANCE_UNDER_6000",
+            "triggered": False,
+            "overridden_by_exception": False,
+            "overridden_by_election": False,
+            "effectively_active": False,
+            "reason": "Low-balance check skipped — super balance not provided.",
+            "supporting_facts": {"account_balance": None, "threshold": LOW_BALANCE_THRESHOLD_AUD},
+        }
+
+    balance = raw_balance
     below = balance < LOW_BALANCE_THRESHOLD_AUD
     grandfathered = inp["had_balance_ge6000_after_2019_11_01"] is True
     product_start = inp["product_start_date"]
@@ -478,6 +501,77 @@ def _resolve_legal_status(inp: dict, validation: dict) -> dict:
 
 
 # =========================================================================
+# COVERAGE NEEDS ANALYSIS
+# =========================================================================
+
+INCOME_MULTIPLE_LOW  = 10
+INCOME_MULTIPLE_HIGH = 15
+FINAL_EXPENSES_BUFFER = 30_000  # estate/funeral/legal costs
+
+
+def _calc_coverage_needs(inp: dict, mortgage_balance: float | None = None) -> dict:
+    """
+    Income-multiple + debt-clearance needs analysis.
+    Returns a needs estimate with shortfall classification.
+    """
+    income = inp["annual_income"]
+    existing_cover = inp["existing_insurance_needs_estimate"] or 0
+
+    if income is None:
+        return {
+            "needs_analysis_available": False,
+            "reason": "Annual income not provided — income multiple calculation unavailable.",
+        }
+
+    income_low  = income * INCOME_MULTIPLE_LOW
+    income_high = income * INCOME_MULTIPLE_HIGH
+    debt        = mortgage_balance or 0
+    total_low   = income_low  + debt + FINAL_EXPENSES_BUFFER
+    total_high  = income_high + debt + FINAL_EXPENSES_BUFFER
+    shortfall   = max(0, total_low - existing_cover)
+
+    if existing_cover == 0:
+        shortfall_level = "UNKNOWN_EXISTING"
+    elif shortfall <= 0:
+        shortfall_level = "NONE"
+    elif shortfall <= 200_000:
+        shortfall_level = "MINOR"
+    elif shortfall <= 500_000:
+        shortfall_level = "MODERATE"
+    elif shortfall <= 1_000_000:
+        shortfall_level = "SIGNIFICANT"
+    else:
+        shortfall_level = "CRITICAL"
+
+    return {
+        "needs_analysis_available": True,
+        "annual_income": income,
+        "income_multiple_range": f"{INCOME_MULTIPLE_LOW}x – {INCOME_MULTIPLE_HIGH}x",
+        "income_replacement_need_low":  round(income_low,  2),
+        "income_replacement_need_high": round(income_high, 2),
+        "debt_clearance_need": round(debt, 2),
+        "final_expenses_buffer": FINAL_EXPENSES_BUFFER,
+        "total_need_low":  round(total_low,  2),
+        "total_need_high": round(total_high, 2),
+        "existing_cover": existing_cover,
+        "shortfall_estimate": round(shortfall, 2),
+        "shortfall_level": shortfall_level,
+        "recommendation_summary": (
+            f"Based on income of ${income:,.0f} p.a., the estimated life insurance need is "
+            f"${total_low:,.0f} – ${total_high:,.0f} "
+            f"(including ${debt:,.0f} debt clearance and ${FINAL_EXPENSES_BUFFER:,.0f} final expenses). "
+            f"Current cover of ${existing_cover:,.0f} represents a shortfall of approximately "
+            f"${shortfall:,.0f} — classified as {shortfall_level}."
+            if existing_cover > 0 else
+            f"Based on income of ${income:,.0f} p.a., the estimated life insurance need is "
+            f"${total_low:,.0f} – ${total_high:,.0f} "
+            f"(including ${debt:,.0f} debt clearance and ${FINAL_EXPENSES_BUFFER:,.0f} final expenses). "
+            "Existing cover amount not provided — full shortfall cannot be calculated."
+        ),
+    }
+
+
+# =========================================================================
 # CALCULATIONS
 # =========================================================================
 
@@ -526,11 +620,17 @@ def _calc_beneficiary_tax_risk(inp: dict) -> dict:
 
 
 def _calc_placement_scores(inp: dict) -> dict:
-    cashflow_benefit = 30
+    # Default: inside-super premium funding has moderate cashflow benefit even without
+    # explicit pressure — most clients with mortgages and dependants benefit from
+    # keeping premiums out of their take-home cash flow.
+    cashflow_benefit = 50
     if inp["cashflow_pressure"]:
         cashflow_benefit = 85
     elif inp["wants_affordability"]:
-        cashflow_benefit = 70
+        cashflow_benefit = 75
+    elif inp["has_dependants"]:
+        # Dependants increase the financial burden and thus the value of super-funded premiums
+        cashflow_benefit = max(cashflow_benefit, 60)
 
     tax_benefit = 40
     mtr = inp["marginal_tax_rate"]
@@ -767,16 +867,25 @@ class LifeInsuranceInSuperTool(BaseTool):
         # 3. Resolve legal status
         legal = _resolve_legal_status(inp, validation)
 
-        # 4. Calculations
+        # 4. Coverage needs analysis (income multiple + debt clearance gap)
+        financial = input_data.get("financialPosition") or {}
+        mortgage = financial.get("mortgageBalance") or inp.get("monthly_surplus")  # best-effort
+        # Also check adviceContext for mortgage if not in financialPosition
+        advice_ctx_raw = input_data.get("adviceContext") or {}
+        if mortgage is None:
+            mortgage = advice_ctx_raw.get("mortgageBalance")
+        coverage_needs = _calc_coverage_needs(inp, mortgage_balance=mortgage)
+
+        # 5. Calculations
         retirement_drag = _calc_retirement_drag(inp)
         beneficiary_tax_risk = _calc_beneficiary_tax_risk(inp)
         placement_scores = _calc_placement_scores(inp)
         placement = _eval_placement(inp, legal["status"], placement_scores)
 
-        # 5. Member actions
+        # 6. Member actions
         member_actions = _generate_member_actions(inp, legal["status"])
 
-        # 6. Advice mode
+        # 7. Advice mode
         if not validation["isValid"]:
             advice_mode = "NEEDS_MORE_INFO"
         elif any([
@@ -793,11 +902,13 @@ class LifeInsuranceInSuperTool(BaseTool):
             "legal_reasons": legal["reasons"],
             "switch_off_triggers": legal["switch_off_evaluations"],
             "exceptions_applied": legal["exceptions_applied"],
+            "coverage_needs_analysis": coverage_needs,
             "member_actions": member_actions,
             "retirement_drag_estimate": retirement_drag,
             "beneficiary_tax_risk": beneficiary_tax_risk,
             "placement_assessment": placement,
             "placement_scores": placement_scores,
+            "health": input_data.get("health"),  # pass through for underwriting assessment
             "advice_mode": advice_mode,
             "missing_info_questions": validation["missingInfoQuestions"],
             "engine_version": ENGINE_VERSION,

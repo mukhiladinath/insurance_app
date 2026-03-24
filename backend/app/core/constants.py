@@ -52,6 +52,7 @@ class Intent:
     TOOL_IP_IN_SUPER = "purchase_retain_ip_in_super"
     TOOL_TRAUMA_CI_POLICY = "purchase_retain_trauma_ci_policy"
     TOOL_TPD_POLICY_ASSESSMENT = "tpd_policy_assessment"
+    TOOL_TPD_IN_SUPER = "purchase_retain_tpd_in_super"
     CLARIFICATION_NEEDED = "clarification_needed"
 
 
@@ -65,6 +66,7 @@ class ToolName:
     IP_IN_SUPER = "purchase_retain_ip_in_super"
     TRAUMA_CI_POLICY = "purchase_retain_trauma_ci_policy"
     TPD_POLICY_ASSESSMENT = "tpd_policy_assessment"
+    TPD_IN_SUPER = "purchase_retain_tpd_in_super"
 
 
 # -------------------------------------------------------------------------

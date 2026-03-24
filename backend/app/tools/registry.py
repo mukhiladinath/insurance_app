@@ -12,6 +12,7 @@ from app.tools.implementations.income_protection_policy import IncomeProtectionP
 from app.tools.implementations.ip_in_super import IPInSuperTool
 from app.tools.implementations.trauma_critical_illness_policy import TraumaCIPolicyTool
 from app.tools.implementations.tpd_policy_assessment import TPDPolicyAssessmentTool
+from app.tools.implementations.tpd_in_super import TPDInSuperTool
 
 # -------------------------------------------------------------------------
 # Registry — maps tool name → tool instance
@@ -31,6 +32,7 @@ _register(IncomeProtectionPolicyTool())
 _register(IPInSuperTool())
 _register(TraumaCIPolicyTool())
 _register(TPDPolicyAssessmentTool())
+_register(TPDInSuperTool())
 
 
 # -------------------------------------------------------------------------

@@ -15,6 +15,7 @@ The intent output is one of:
   - "purchase_retain_ip_in_super"
   - "purchase_retain_trauma_ci_policy"
   - "tpd_policy_assessment"
+  - "purchase_retain_tpd_in_super"
   - "clarification_needed"
 """
 
@@ -54,6 +55,13 @@ _LIFE_TPD_KEYWORDS = [
     "income replacement", "death cover", "trauma", "income protection",
     "underwriting", "policy comparison", "retain vs replace",
     "retain or replace", "life cover", "cover gap",
+    # Product recommendation / switching queries
+    "which product", "which insurer", "which provider", "which company",
+    "recommend a product", "recommend an insurer", "best product", "best insurer",
+    "best policy", "best cover", "switch to", "switch product", "new product",
+    "which life", "product recommendation", "compare products", "compare policies",
+    "compare insurers", "compare providers", "who should", "who do you recommend",
+    "what product", "what insurer", "what policy",
     # "premium" removed — too generic, collides with super premium context
 ]
 
@@ -169,18 +177,61 @@ _TPD_ASSESSMENT_COMPOUND_RIGHT = [
     "assessment", "compliance", "sis", "sps",
 ]
 
+# TPD INSIDE SUPER — purchase/retain TPD cover specifically within a superannuation fund
+# Checked BEFORE the generic TPD assessment tool so super-specific TPD queries get this tool
+_TPD_IN_SUPER_KEYWORDS = [
+    "tpd in super", "tpd inside super", "tpd inside superannuation", "tpd super fund",
+    "tpd group cover", "group tpd", "super tpd cover", "tpd default cover",
+    "tpd switch off", "tpd inactivity", "tpd low balance", "tpd under 25",
+    "tpd election", "tpd opt in", "retain tpd super", "purchase tpd super",
+    "tpd through super", "tpd via super", "tpd in my super",
+    "tpd pys", "tpd pmif", "tpd sis act", "tpd 68aaa", "tpd 68aab",
+    "tpd retirement drag", "tpd super placement", "tpd super benefit",
+    "any occupation in super", "adl in super", "tpd notice",
+    "tpd cover in super", "tpd cover inside super",
+    "purchase tpd in super", "purchase tpd inside super",
+    "retain tpd in super", "retain tpd inside super",
+    "tpd group insurance", "default tpd super",
+    "tpd auto acceptance", "tpd aal", "tpd automatic acceptance",
+]
+
+# Compound left/right for TPD-in-super detection
+# Rule: ("tpd" or "total and permanent") AND ("super" or "superannuation" or "fund")
+#       AND one of these right-side terms → TPD_IN_SUPER
+_TPD_IN_SUPER_COMPOUND_LEFT  = ["tpd", "total and permanent disability", "total permanent disability"]
+_TPD_IN_SUPER_COMPOUND_SUPER = ["super", "superannuation", "mysuper", "fund", "smsf"]
+_TPD_IN_SUPER_COMPOUND_RIGHT = [
+    "purchase", "retain", "cover", "group", "default", "switch off", "inactivity",
+    "low balance", "election", "opt in", "opt-in", "placement", "benefit",
+    "premium", "notice", "aal", "acceptance limit", "pys", "pmif",
+]
+
 
 def _classify_by_rules(message: str) -> str | None:
     """Apply deterministic keyword rules. Returns intent string or None."""
     lower = message.lower()
 
-    # --- TIER 0: TPD policy assessment — checked FIRST because "tpd", "own occupation",
-    #     "disability claim", and "adl" keywords collide with IP and super tiers below.
-    #     Gate: message contains "tpd" or "total and permanent disability" and is NOT a
-    #     combined life+TPD query (those still fall to the life/TPD tier at the bottom). ---
+    # Pre-compute shared TPD and super signals (used across TIER 0 and TIER 0.5)
     _is_combined_life_tpd = "life insurance" in lower and "tpd" in lower
     _has_tpd_signal = "tpd" in lower or "total and permanent disability" in lower or "total permanent disability" in lower
+    _has_super_signal = any(s in lower for s in _TPD_IN_SUPER_COMPOUND_SUPER)
+
+    # --- TIER 0 / 0.5: TPD routing — split between in-super and generic assessment.
+    #     TIER 0.5 (TPD-in-super) is evaluated FIRST within this block because it is more
+    #     specific. If the message has a TPD signal AND a super/fund signal AND a
+    #     purchase/retain/group/switch-off context, it routes to the in-super tool.
+    #     Otherwise it falls through to the generic TPD assessment tool. ---
     if _has_tpd_signal and not _is_combined_life_tpd:
+        # TIER 0.5 first: TPD inside super (purchase/retain, group cover, switch-off, PYS)
+        if _has_super_signal:
+            if any(kw in lower for kw in _TPD_IN_SUPER_KEYWORDS):
+                return Intent.TOOL_TPD_IN_SUPER
+            # Compound: tpd/total-and-permanent + super/fund + purchase/retain/group/cover term
+            if (any(left in lower for left in _TPD_IN_SUPER_COMPOUND_LEFT) and
+                    any(right in lower for right in _TPD_IN_SUPER_COMPOUND_RIGHT)):
+                return Intent.TOOL_TPD_IN_SUPER
+
+        # TIER 0: generic TPD policy assessment (definition quality, claims, tax, lapse, etc.)
         if any(kw in lower for kw in _TPD_ASSESSMENT_KEYWORDS):
             return Intent.TOOL_TPD_POLICY_ASSESSMENT
         # Compound: "tpd"/"permanently disabled" + placement/definition/claim term
@@ -375,18 +426,47 @@ Omit fields that are not mentioned. Return only a JSON object.
     "purchase_retain_life_insurance_in_super": """\
 Extract any of these fields that are explicitly stated in the conversation.
 Omit fields that are not mentioned. Return only a JSON object.
+
+For fund.fundType: map "industry fund" → "choice", "retail fund" → "choice", "MySuper" or "default fund" → "mysuper", "SMSF" or "self-managed" → "smsf", "defined benefit" → "defined_benefit".
+
 {
   "member": {
     "age": <integer>,
-    "superBalance": <AUD number>,
     "annualIncome": <AUD number>,
-    "annualPremium": <AUD number — use this when user mentions "insurance premium" or "premium">,
+    "marginalTaxRate": <decimal e.g. 0.37>,
     "employmentStatus": <"EMPLOYED_FULL_TIME"|"EMPLOYED_PART_TIME"|"SELF_EMPLOYED"|"UNEMPLOYED">,
-    "accountInactiveMonths": <integer>
+    "hasDependants": <true|false — true if spouse/children mentioned>,
+    "cashflowPressure": <true|false — true if client mentions cashflow constraints or wants premiums inside super>,
+    "wantsAffordability": <true|false — true if client mentions keeping premiums manageable or affordable>,
+    "wantsInsideSuper": <true|false>,
+    "existingInsuranceNeedsEstimate": <AUD number — current sum insured if mentioned>
   },
   "fund": {
+    "fundType": <"mysuper"|"choice"|"smsf"|"defined_benefit">,
     "fundName": <string>,
-    "isMySuperProduct": <true|false>
+    "isMySuperProduct": <true|false>,
+    "accountBalance": <AUD number>
+  },
+  "product": {
+    "accountBalance": <AUD number — super balance>,
+    "coverTypesPresent": [<"DEATH_COVER"|"TOTAL_AND_PERMANENT_DISABILITY"|"INCOME_PROTECTION">, ...],
+    "receivedAmountInLast16Months": <true|false>
+  },
+  "financialPosition": {
+    "mortgageBalance": <AUD number — outstanding mortgage/home loan balance>,
+    "liquidAssets": <AUD number — savings, investments outside super>
+  },
+  "health": {
+    "heightCm": <number — height in centimetres>,
+    "weightKg": <number — weight in kilograms>,
+    "existingMedicalConditions": [<string>, ...],
+    "currentMedications": [<string>, ...],
+    "isSmoker": <true|false>
+  },
+  "adviceContext": {
+    "yearsToRetirement": <number>,
+    "estimatedAnnualPremium": <AUD number — use when user mentions "insurance premium" or "premium">,
+    "currentMonthlySurplusAfterExpenses": <AUD number>
   }
 }""",
     "tpd_policy_assessment": """\
@@ -502,6 +582,70 @@ Omit fields that are not mentioned. Return only a JSON object.
     "wantsMultiClaimRider": <true|false>
   }
 }""",
+    "purchase_retain_tpd_in_super": """\
+Extract any of these fields that are explicitly stated in the conversation.
+Omit fields that are not mentioned. Return only a JSON object.
+{
+  "member": {
+    "age": <integer>,
+    "annualGrossIncome": <AUD number>,
+    "marginalTaxRate": <decimal e.g. 0.37>,
+    "employmentStatus": <"EMPLOYED_FULL_TIME"|"EMPLOYED_PART_TIME"|"SELF_EMPLOYED"|"UNEMPLOYED">,
+    "weeklyHoursWorked": <number>,
+    "occupation": <string>,
+    "occupationClass": <"CLASS_1_WHITE_COLLAR"|"CLASS_2_LIGHT_BLUE"|"CLASS_3_BLUE_COLLAR"|"CLASS_4_HAZARDOUS"|"UNKNOWN">,
+    "hasDependants": <true|false>,
+    "numberOfDependants": <integer>,
+    "dateOfBirth": <ISO date YYYY-MM-DD>
+  },
+  "fund": {
+    "fundType": <"mysuper"|"choice"|"smsf"|"defined_benefit">,
+    "fundName": <string>,
+    "accountBalance": <AUD number>,
+    "receivedAmountInLast16Months": <true|false>,
+    "accountInactiveMonths": <integer — months since last contribution>,
+    "memberCount": <integer — number of fund members, for small fund carve-out>,
+    "isDefinedBenefitMember": <true|false>,
+    "isADFOrCommonwealth": <true|false>
+  },
+  "existingCover": {
+    "hasExistingTPDCover": <true|false>,
+    "tpdSumInsured": <AUD number>,
+    "tpdDefinition": <"OWN_OCCUPATION"|"ANY_OCCUPATION"|"ADL"|"UNKNOWN">,
+    "annualPremium": <AUD number — use when user mentions "tpd premium" or "super premium">,
+    "coverIsInsideSuper": <true|false>,
+    "policyInceptionDate": <ISO date YYYY-MM-DD>,
+    "hadBalanceGe6000After20191101": <true|false>
+  },
+  "proposedCover": {
+    "tpdSumInsured": <AUD number>,
+    "annualPremium": <AUD number>
+  },
+  "elections": {
+    "optedInToRetainInsurance": <true|false>,
+    "optedOutOfInsurance": <true|false>,
+    "electionDate": <ISO date YYYY-MM-DD>
+  },
+  "financialPosition": {
+    "mortgageBalance": <AUD number>,
+    "otherDebts": <AUD number>,
+    "liquidAssets": <AUD number>,
+    "monthlyExpenses": <AUD number>
+  },
+  "health": {
+    "heightCm": <number>,
+    "weightKg": <number>,
+    "existingMedicalConditions": [<string>, ...],
+    "currentMedications": [<string>, ...],
+    "isSmoker": <true|false>
+  },
+  "adviceContext": {
+    "yearsToRetirement": <number>,
+    "wantsAffordability": <true|false>,
+    "wantsOwnOccupation": <true|false>,
+    "considerRetailTopUp": <true|false>
+  }
+}""",
 }
 
 
@@ -566,19 +710,20 @@ async def _classify_by_llm(message: str, recent_messages: list[dict]) -> dict:
 
     system_prompt = """You are an intent classifier for an insurance advisory AI system.
 Classify the user's message into exactly one of these intents:
-- "purchase_retain_life_insurance_in_super": questions about life insurance inside superannuation, PYS rules, switch-off triggers, MySuper, insurance opt-in/opt-out
-- "purchase_retain_life_tpd_policy": questions about life or TPD insurance policies (purchase, retain, replace, supplement), cover needs, policy comparison, underwriting
+- "purchase_retain_life_insurance_in_super": questions specifically about whether life insurance INSIDE superannuation is legally permissible or strategically appropriate — PYS rules, switch-off triggers, MySuper, insurance opt-in/opt-out, placement inside vs outside super, increasing cover within a super fund, super fund product/provider recommendations. Also use this intent when the conversation context is about inside-super insurance and the user is providing additional client data (health, financial details) that refines that analysis.
+- "purchase_retain_life_tpd_policy": questions about selecting, comparing, purchasing, replacing, or recommending a RETAIL life or TPD insurance policy held OUTSIDE super — cover needs analysis, which retail product/insurer/provider to choose, retail policy comparison, underwriting for standalone retail policies, switching to a new retail product. Do NOT use this just because the user provides health data if the conversation context is about super fund insurance.
 - "purchase_retain_income_protection_policy": questions about standalone income protection / disability income insurance OUTSIDE of super — waiting periods, benefit periods, monthly benefit amounts, occupation definitions, premium waiver, indexation, IP policy replacement or retention, income replacement gap
 - "purchase_retain_ip_in_super": questions about income protection (salary continuance) insurance held INSIDE a superannuation fund — SIS Reg 6.15 work test, group IP in super, portability window, SPS 250 trustee obligations, IP premium from super balance, SMSF insurance, super fund IP claim
 - "purchase_retain_trauma_ci_policy": questions about trauma or critical illness (CI) insurance — purchasing, retaining, or replacing a trauma/CI policy; CI sum insured need; covered conditions (cancer, heart attack, stroke); waiting period (90 days); survival period (14–30 days); advancement/partial benefits; Life Code minimum definitions; CI premium affordability; CI underwriting risk; cooling-off period; CI cannot be held in superannuation
 - "tpd_policy_assessment": questions specifically about TPD insurance definition quality (own-occupation vs any-occupation vs activities of daily living/ADL), TPD placement in super vs retail, SIS Reg 4.07C/D compliance, grandfathered own-occ TPD, TPD claim eligibility and decline rates (ASIC Rep 633), super TPD tax treatment (ITAA Div. 295), TPD lapse and reinstatement, AFCA TPD disputes, SPS 250 trustee obligations, automatic acceptance limit, permanent incapacity condition of release, TPD premium structure analysis
+- "purchase_retain_tpd_in_super": questions about purchasing or retaining TPD (total and permanent disability) insurance specifically INSIDE a superannuation fund — PYS switch-off triggers for TPD, inactivity cessation, low balance, under-25 rule, TPD opt-in election, group TPD default cover, TPD inside super definition constraint (any-occupation only, own-occ banned post-Jul 2014 SIS Reg 4.07D), automatic acceptance limit for group TPD ($100k), TPD benefit tax inside super (~22% under 60, tax-free over 60), retirement drag from TPD premiums on super balance, split strategy (inside super any-occ + retail own-occ top-up), TPD notice schedule (9/12/15 months inactivity)
 - "direct_response": general questions, greetings, clarifications not requiring a tool
 - "clarification_needed": message is too ambiguous to classify
 
 Respond with a JSON object only:
 {"intent": "<intent>", "selected_tool": "<tool_name or null>", "reasoning": "<one sentence>"}
 
-tool_name must be exactly "purchase_retain_life_insurance_in_super" or "purchase_retain_life_tpd_policy" or "purchase_retain_income_protection_policy" or "purchase_retain_ip_in_super" or "purchase_retain_trauma_ci_policy" or "tpd_policy_assessment" or null."""
+tool_name must be exactly "purchase_retain_life_insurance_in_super" or "purchase_retain_life_tpd_policy" or "purchase_retain_income_protection_policy" or "purchase_retain_ip_in_super" or "purchase_retain_trauma_ci_policy" or "tpd_policy_assessment" or "purchase_retain_tpd_in_super" or null."""
 
     context_str = ""
     if recent_messages:
@@ -645,6 +790,7 @@ async def classify_intent(state: AgentState) -> dict:
         Intent.TOOL_IP_IN_SUPER,
         Intent.TOOL_TRAUMA_CI_POLICY,
         Intent.TOOL_TPD_POLICY_ASSESSMENT,
+        Intent.TOOL_TPD_IN_SUPER,
     ):
         logger.debug("classify_intent: rule match → %s", rule_intent)
         tool_input = await _extract_tool_inputs(rule_intent, message, recent)

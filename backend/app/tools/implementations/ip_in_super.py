@@ -357,11 +357,23 @@ def _eval_inactivity(inp: dict) -> dict:
 
 
 def _eval_low_balance(inp: dict) -> dict:
-    balance     = inp["account_balance"] or 0
-    below       = balance < LOW_BALANCE_THRESHOLD_AUD
+    balance = inp["account_balance"]
+    # If balance was not provided, skip the check entirely rather than defaulting to 0
+    # (which would incorrectly trigger the switch-off for every client with unknown balance)
+    if balance is None:
+        return {
+            "trigger": "LOW_BALANCE_UNDER_6000",
+            "triggered": False,
+            "overridden_by_exception": False,
+            "overridden_by_election": False,
+            "effectively_active": False,
+            "reason": "Account balance not provided — low-balance check skipped. Confirm balance to complete assessment.",
+            "supporting_facts": {"account_balance": None, "threshold": LOW_BALANCE_THRESHOLD_AUD},
+        }
+    below         = balance < LOW_BALANCE_THRESHOLD_AUD
     grandfathered = inp["had_balance_ge6000_after_2019_11_01"] is True
-    post_pys    = inp["evaluation_date"] >= PYS_COMMENCEMENT_DATE
-    triggered   = below and not grandfathered and post_pys
+    post_pys      = inp["evaluation_date"] >= PYS_COMMENCEMENT_DATE
+    triggered     = below and not grandfathered and post_pys
 
     return {
         "trigger": "LOW_BALANCE_UNDER_6000",
