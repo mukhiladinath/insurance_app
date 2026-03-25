@@ -5,6 +5,7 @@ import { Paperclip, Send, X, FileText, Loader2, AlertCircle, CheckCircle2 } from
 import { useChatStore } from '@/store/chat-store';
 import { formatFileSize, cn } from '@/lib/utils';
 import { UploadHint } from './UploadHint';
+import { SlashMenu, SlashCommand, SLASH_COMMANDS } from './SlashMenu';
 
 const ACCEPTED_TYPES = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -13,6 +14,9 @@ export function PromptComposer() {
   const [value, setValue] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [showUploadHint, setShowUploadHint] = useState(false);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -29,6 +33,32 @@ export function PromptComposer() {
       });
     },
     [uploadAndAddFile]
+  );
+
+  // Slash command filtering (mirrors SlashMenu logic so Enter key works)
+  const filteredSlashCommands = SLASH_COMMANDS.filter(
+    (c) =>
+      slashQuery === '' ||
+      c.label.toLowerCase().includes(slashQuery.toLowerCase()) ||
+      c.description.toLowerCase().includes(slashQuery.toLowerCase()),
+  );
+
+  const handleSlashSelect = useCallback(
+    (cmd: SlashCommand) => {
+      // Replace the /query portion at end of input with the command prompt
+      const newValue = value.replace(/(^|\s)\/\S*$/, (match, prefix) => prefix + cmd.prompt);
+      setValue(newValue);
+      setShowSlashMenu(false);
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(newValue.length, newValue.length);
+          textareaRef.current.style.height = 'auto';
+          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
+        }
+      }, 0);
+    },
+    [value],
   );
 
   // Prevent sending while any file is still uploading
@@ -53,6 +83,29 @@ export function PromptComposer() {
   }, [value, pendingFiles, isStreaming, sendMessage]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSlashMenu) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashActiveIndex((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashActiveIndex((i) => Math.min(i + 1, filteredSlashCommands.length - 1));
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const cmd = filteredSlashCommands[slashActiveIndex];
+        if (cmd) handleSlashSelect(cmd);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSlashMenu(false);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -60,11 +113,21 @@ export function PromptComposer() {
   };
 
   const handleTextareaChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    setValue(e.target.value);
+    const text = e.target.value;
+    setValue(text);
     // Auto-grow
     const el = e.target;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+    // Slash menu: detect /query at end of input (start of line or after whitespace)
+    const slashMatch = text.match(/(^|\s)\/(\S*)$/);
+    if (slashMatch) {
+      setSlashQuery(slashMatch[2]);
+      setShowSlashMenu(true);
+      setSlashActiveIndex(0);
+    } else {
+      setShowSlashMenu(false);
+    }
   };
 
   const handleDragOver = (e: DragEvent) => {
@@ -92,7 +155,18 @@ export function PromptComposer() {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="mx-auto max-w-3xl space-y-2">
+      <div className="relative mx-auto max-w-3xl space-y-2">
+        {/* Slash command menu — appears above the composer */}
+        {showSlashMenu && (
+          <SlashMenu
+            query={slashQuery}
+            onSelect={handleSlashSelect}
+            onClose={() => setShowSlashMenu(false)}
+            activeIndex={slashActiveIndex}
+            setActiveIndex={setSlashActiveIndex}
+          />
+        )}
+
         {/* Upload hint — shown on drag or toggle */}
         {(showUploadHint || isDragging) && (
           <UploadHint isDragging={isDragging} />

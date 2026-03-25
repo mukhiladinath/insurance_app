@@ -174,6 +174,7 @@ _TPD_ASSESSMENT_KEYWORDS = [
     "afca tpd", "idr tpd", "tpd dispute",
     "mysuper tpd", "default tpd cover",
     "tpd eligibility", "tpd assessment",
+    "assess tpd", "tpd policy assessment", "assess the tpd",
     "asic rep 633", "rep 633",
     "total and permanent disability",
     "total permanent disability",
@@ -193,6 +194,8 @@ _TPD_ASSESSMENT_COMPOUND_RIGHT = [
 # Checked BEFORE the generic TPD assessment tool so super-specific TPD queries get this tool
 _TPD_IN_SUPER_KEYWORDS = [
     "tpd in super", "tpd inside super", "tpd inside superannuation", "tpd super fund",
+    "tpd insurance in super", "tpd insurance inside super", "analyse tpd insurance in super",
+    "analyze tpd insurance in super",
     "tpd group cover", "group tpd", "super tpd cover", "tpd default cover",
     "tpd switch off", "tpd inactivity", "tpd low balance", "tpd under 25",
     "tpd election", "tpd opt in", "retain tpd super", "purchase tpd super",
@@ -317,7 +320,6 @@ def _classify_by_rules(message: str) -> str | None:
 
     # SOA generation — check FIRST, before all other rules
     if any(trigger in lower for trigger in _SOA_TRIGGERS):
-        from app.core.constants import Intent
         return Intent.GENERATE_SOA
 
     # Pre-compute shared TPD and super signals (used across TIER 0 and TIER 0.5)
@@ -822,6 +824,7 @@ Rules:
 - Extract ONLY values explicitly stated in the conversation. Never infer or guess.
 - Include a field ONLY if its value is clearly present.
 - Monetary values must be plain numbers (300000, not "$300,000").
+- CRITICAL: When a value has been corrected during the conversation (e.g. "actually X", "not X, it's Y", "the correct value is", "correction:", "it should be"), ALWAYS extract the corrected/most recent value. Never use a value that was explicitly superseded by a correction.
 - Return ONLY valid compact JSON. No explanation, no markdown fences."""
 
     model = get_chat_model(temperature=0.0)
@@ -962,7 +965,15 @@ async def classify_intent(state: AgentState) -> dict:
             )
             if target_tool:
                 logger.info("classify_intent: correction + re-run request — running tool '%s'", target_tool)
-                tool_input = await _extract_tool_inputs(target_tool, message, recent)
+                # Only call extraction if the message actually contains new data values.
+                # For pure re-run triggers ("recalculate", "run again"), skip extraction
+                # so stale values from conversation history cannot override updated memory.
+                message_has_data = any(c.isdigit() for c in message) or any(
+                    term in message.lower() for term in _DATA_PATTERNS
+                )
+                tool_input = {}
+                if message_has_data:
+                    tool_input = await _extract_tool_inputs(target_tool, message, recent) or {}
                 tool_input = _merge_memory_into_tool_input(target_tool, client_memory, tool_input)
                 return {
                     "intent": target_tool,
@@ -1013,10 +1024,16 @@ async def classify_intent(state: AgentState) -> dict:
         selected_tool = None
         intent = Intent.DIRECT_RESPONSE
 
-    # Extract structured inputs when a tool is selected, then blend with memory
+    # Extract structured inputs when a tool is selected, then blend with memory.
+    # If the current message contains no data values (pure "re-run" request), skip
+    # extraction entirely — rely on memory which has already been updated by prior turns.
     tool_input: dict | None = None
     if selected_tool:
-        tool_input = await _extract_tool_inputs(selected_tool, message, recent) or None
+        message_has_data = any(c.isdigit() for c in message) or any(
+            term in message.lower() for term in _DATA_PATTERNS
+        )
+        if message_has_data:
+            tool_input = await _extract_tool_inputs(selected_tool, message, recent) or None
         tool_input = _merge_memory_into_tool_input(selected_tool, client_memory, tool_input or {}) or None
 
     return {

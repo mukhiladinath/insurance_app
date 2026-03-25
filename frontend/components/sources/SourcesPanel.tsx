@@ -2,6 +2,7 @@
 
 import { useChatStore } from '@/store/chat-store';
 import { getDocumentUrl } from '@/lib/api';
+import { parseUTCDate } from '@/lib/utils';
 import type { ConversationDocument } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
@@ -49,7 +50,7 @@ function FileIcon({ contentType }: { contentType: string }) {
 
 function DocumentCard({ doc }: { doc: ConversationDocument }) {
   const url = getDocumentUrl(doc.id);
-  const uploadedAt = new Date(doc.created_at).toLocaleString('en-IN', {
+  const uploadedAt = parseUTCDate(doc.created_at).toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
   });

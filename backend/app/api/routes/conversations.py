@@ -41,6 +41,7 @@ async def get_conversation(conversation_id: str):
 async def delete_conversation(conversation_id: str):
     """Hard-delete a conversation and its messages."""
     from app.db.collections import MESSAGES
+    from app.db.repositories.conversation_repository import ConversationRepository
     db = get_db()
     conv_repo = ConversationRepository(db)
     deleted = await conv_repo.delete(conversation_id)
@@ -53,15 +54,18 @@ async def delete_conversation(conversation_id: str):
 @router.get("/{conversation_id}/documents")
 async def list_documents(conversation_id: str):
     """
-    List all uploaded documents for a conversation.
+    List documents for a conversation.
 
-    Returns documents linked to this conversation AND documents uploaded by the
-    same user that have no conversation_id yet (uploaded before the first message).
+    Returns documents explicitly linked to this conversation. Any documents that
+    belong to the same user but were stored without a conversation_id (uploaded
+    before the linking mechanism was in place) are retroactively linked here so
+    they only appear under this conversation going forward.
     """
     from app.db.repositories.document_repository import DocumentRepository
     from app.db.repositories.conversation_repository import ConversationRepository
     from pydantic import BaseModel
     from datetime import datetime
+    import asyncio
 
     class DocumentOut(BaseModel):
         id: str
@@ -76,22 +80,25 @@ async def list_documents(conversation_id: str):
     doc_repo = DocumentRepository(db)
     conv_repo = ConversationRepository(db)
 
-    # Primary: documents explicitly linked to this conversation
+    # Primary: documents already linked to this conversation
     linked = await doc_repo.list_by_conversation(conversation_id)
-    linked_ids = {d["id"] for d in linked}
 
-    # Fallback: documents with no conversation_id for this user
-    # (uploaded before the conversation was created, not yet linked by load_documents)
+    # Retroactive link: any unlinked docs for this user get assigned here
     conv = await conv_repo.get_by_id(conversation_id)
-    unlinked = []
     if conv:
         unlinked = await doc_repo.list_unlinked_by_user(conv["user_id"])
+        if unlinked:
+            # Link them all to this conversation in parallel
+            await asyncio.gather(*[
+                doc_repo.attach_conversation(d["id"], conversation_id)
+                for d in unlinked
+            ])
+            linked = linked + unlinked
 
-    all_docs = linked + [d for d in unlinked if d["id"] not in linked_ids]
-    all_docs.sort(key=lambda d: d.get("created_at") or datetime.min)
+    linked.sort(key=lambda d: d.get("created_at") or datetime.min)
 
     result = []
-    for d in all_docs:
+    for d in linked:
         facts = d.get("extracted_facts") or {}
         result.append(DocumentOut(
             id=d["id"],

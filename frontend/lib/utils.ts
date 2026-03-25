@@ -5,6 +5,18 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Parse an ISO datetime string from the backend as UTC.
+ * MongoDB/Pydantic may omit the trailing "Z", causing JS to parse as local time.
+ * This always appends "Z" if no timezone designator is present.
+ */
+export function parseUTCDate(s: string | Date): Date {
+  if (s instanceof Date) return s;
+  // Already has timezone info (+HH:MM or Z)
+  if (s.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(s)) return new Date(s);
+  return new Date(s + 'Z');
+}
+
 const IST = 'Asia/Kolkata';
 
 /** Returns "YYYY-MM-DD" in IST for date comparison. */

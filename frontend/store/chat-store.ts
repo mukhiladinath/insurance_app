@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { Chat, Message, Attachment, WorkspaceStatus, SOASection, SOAMissingQuestion, SOADraftPayload, ConversationDocument } from '@/lib/types';
 import * as api from '@/lib/api';
-import { generateId } from '@/lib/utils';
+import { generateId, parseUTCDate } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
 // Store shape
@@ -69,7 +69,7 @@ function toChat(c: { id: string; title: string; updated_at: string; last_message
     id: c.id,
     title: c.title,
     lastMessage: '',
-    timestamp: new Date(c.last_message_at ?? c.updated_at),
+    timestamp: parseUTCDate(c.last_message_at ?? c.updated_at),
     messageCount: 0,
   };
 }
@@ -79,7 +79,7 @@ function toMessage(m: { id: string; role: string; content: string; created_at: s
     id: m.id,
     role: m.role as 'user' | 'assistant',
     content: m.content,
-    timestamp: new Date(m.created_at),
+    timestamp: parseUTCDate(m.created_at),
   };
 }
 
@@ -119,10 +119,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       const chats = data.map(toChat);
       set({ chats, isLoadingChats: false });
 
-      // Auto-select first conversation if nothing is active
-      if (get().activeChatId === null && chats.length > 0) {
-        await get().setActiveChat(chats[0].id);
+      // Restore the chat that was open before the page refresh (sessionStorage survives
+      // refresh but is cleared when the tab is closed / a new session starts).
+      const savedId = typeof window !== 'undefined' ? sessionStorage.getItem('activeChatId') : null;
+      if (savedId && chats.some((c) => c.id === savedId)) {
+        await get().setActiveChat(savedId);
       }
+      // Otherwise stay on the new-chat screen (activeChatId remains null)
     } catch {
       set({ isLoadingChats: false });
     }
@@ -132,6 +135,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   // Select a conversation and load its messages
   // -------------------------------------------------------------------------
   setActiveChat: async (id) => {
+    if (typeof window !== 'undefined') sessionStorage.setItem('activeChatId', id);
     set({ activeChatId: id, isLoadingMessages: true, messages: [], isSOAPanelOpen: false, soaSections: [], soaMissingQuestions: [], isSourcesPanelOpen: false, conversationDocuments: [] });
     try {
       const [messages, soaDraft] = await Promise.allSettled([
@@ -237,6 +241,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   // Start a new chat (local only — conversation created on first message)
   // -------------------------------------------------------------------------
   createNewChat: () => {
+    if (typeof window !== 'undefined') sessionStorage.removeItem('activeChatId');
     set({ activeChatId: null, messages: [], pendingFiles: [] });
   },
 
@@ -245,9 +250,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((state) => {
       const remaining = state.chats.filter((c) => c.id !== id);
       const wasActive = state.activeChatId === id;
+      if (wasActive && typeof window !== 'undefined') sessionStorage.removeItem('activeChatId');
       return {
         chats: remaining,
-        activeChatId: wasActive ? (remaining[0]?.id ?? null) : state.activeChatId,
+        activeChatId: wasActive ? null : state.activeChatId,
         messages: wasActive ? [] : state.messages,
         isSOAPanelOpen: wasActive ? false : state.isSOAPanelOpen,
         soaSections: wasActive ? [] : state.soaSections,

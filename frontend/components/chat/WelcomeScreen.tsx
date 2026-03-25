@@ -80,8 +80,8 @@ export function WelcomeScreen() {
                 {cap.icon}
               </div>
               <div className="min-w-0">
-                <p className="text-xs font-semibold text-slate-700 truncate">{cap.title}</p>
-                <p className="text-[11px] text-slate-400 leading-snug line-clamp-2">{cap.description}</p>
+                <p className="text-xs font-semibold text-slate-700">{cap.title}</p>
+                <p className="text-[11px] text-slate-400 leading-snug">{cap.description}</p>
               </div>
             </div>
           ))}
