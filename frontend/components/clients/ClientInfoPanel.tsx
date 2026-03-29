@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import {
   User, DollarSign, Shield, Heart, Target, FileText, ExternalLink, TrendingUp, Clock, ClipboardList, Brain,
-  ScrollText,
+  ScrollText, GitCompare,
 } from 'lucide-react';
 import type { ClientWorkspace, ConversationDocument, AdvisoryNote } from '../../lib/types';
 import { EMPTY_CLIENT_FACTS } from '../../lib/types';
@@ -12,7 +12,9 @@ import { getDocumentUrl } from '../../lib/api';
 import FactFind from './FactFind';
 import AIContextPanel from '../ai/AIContextPanel';
 import SavedAnalysesPanel from './SavedAnalysesPanel';
+import InsuranceComparisonPanel from './InsuranceComparisonPanel';
 import ObjectivesAutomationStatus from './ObjectivesAutomationStatus';
+import type { PendingInsuranceComparison } from '../../store/client-store';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,7 +93,7 @@ const TOOL_LABELS: Record<string, string> = {
 // Tab definitions
 // ---------------------------------------------------------------------------
 
-type Tab = 'factfind' | 'personal' | 'financial' | 'insurance' | 'health' | 'advisory' | 'documents' | 'saved-analyses' | 'ai-memory';
+type Tab = 'factfind' | 'personal' | 'financial' | 'insurance' | 'health' | 'advisory' | 'documents' | 'saved-analyses' | 'compare' | 'ai-memory';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'factfind',   label: 'Fact Find',  icon: <ClipboardList size={14} /> },
@@ -102,6 +104,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'advisory',   label: 'Advisory',   icon: <TrendingUp size={14} /> },
   { id: 'documents',  label: 'Documents',  icon: <FileText size={14} /> },
   { id: 'saved-analyses', label: 'Saved analyses', icon: <ScrollText size={14} /> },
+  { id: 'compare',      label: 'Compare',      icon: <GitCompare size={14} /> },
   { id: 'ai-memory',  label: 'AI Memory',  icon: <Brain size={14} /> },
 ];
 
@@ -287,19 +290,34 @@ interface Props {
   initialTab?: Tab;
   factFindSection?: string;
   onTabConsumed?: () => void;
+  preloadedInsuranceComparison?: PendingInsuranceComparison | null;
+  onPreloadedComparisonConsumed?: () => void;
   clientId?: string | null;
 }
 
-export default function ClientInfoPanel({ workspace, documents, initialTab, factFindSection, onTabConsumed, clientId }: Props) {
+export default function ClientInfoPanel({
+  workspace,
+  documents,
+  initialTab,
+  factFindSection,
+  onTabConsumed,
+  preloadedInsuranceComparison,
+  onPreloadedComparisonConsumed,
+  clientId,
+}: Props) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? 'factfind');
 
-  // Jump to factfind tab when requested from context panel
+  // Jump to Compare when AI bar finished a compare run; otherwise honour initialTab (e.g. Fact Find).
   useEffect(() => {
+    if (preloadedInsuranceComparison) {
+      setActiveTab('compare');
+      return;
+    }
     if (initialTab) {
       setActiveTab(initialTab);
-      onTabConsumed?.();
+      if (initialTab !== 'compare') onTabConsumed?.();
     }
-  }, [initialTab]);
+  }, [initialTab, preloadedInsuranceComparison, onTabConsumed]);
 
   const facts = workspace?.client_facts ?? EMPTY_CLIENT_FACTS;
   const advisoryNotes = workspace?.advisory_notes ?? {};
@@ -338,6 +356,16 @@ export default function ClientInfoPanel({ workspace, documents, initialTab, fact
         {activeTab === 'saved-analyses' && clientId && <SavedAnalysesPanel clientId={clientId} />}
         {activeTab === 'saved-analyses' && !clientId && (
           <div className="text-sm text-slate-400 py-8 text-center">Save the client first to view saved analyses.</div>
+        )}
+        {activeTab === 'compare' && clientId && (
+          <InsuranceComparisonPanel
+            clientId={clientId}
+            preloadedComparison={preloadedInsuranceComparison ?? null}
+            onPreloadedComparisonConsumed={onPreloadedComparisonConsumed}
+          />
+        )}
+        {activeTab === 'compare' && !clientId && (
+          <div className="text-sm text-slate-400 py-8 text-center">Save the client first to compare tool outputs.</div>
         )}
         {activeTab === 'ai-memory' && clientId && <AIContextPanel clientId={clientId} />}
         {activeTab === 'ai-memory' && !clientId && (

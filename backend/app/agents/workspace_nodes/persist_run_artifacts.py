@@ -182,6 +182,15 @@ async def persist_run_artifacts(state: WorkspaceState) -> dict:
                 saved_by=user_id,
             )
             result["saved_run_id"] = saved_run["id"]
+            # Attach comparison_envelope to each completed step (canonical normalized facts).
+            from app.insurance_comparison.envelope import enrich_step_results_with_envelopes
+
+            enriched = enrich_step_results_with_envelopes(
+                step_results,
+                client_id=client_id,
+                saved_run_id=saved_run["id"],
+            )
+            await saved_repo.update_step_results(saved_run["id"], enriched)
             logger.info("persist_run_artifacts: saved run as '%s' (id=%s)", save_run_as, saved_run["id"])
 
         # ---- 7. Touch conversation ----

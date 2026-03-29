@@ -43,6 +43,9 @@ CLIENT_MEMORIES = "client_memories"   # per-client per-category markdown memory 
 # Persisted LLM summaries from orchestrator analysis tool runs (per client)
 CLIENT_ANALYSIS_OUTPUTS = "client_analysis_outputs"
 
+# Saved insurance comparison sessions (structured compare results)
+INSURANCE_TOOL_COMPARISONS = "insurance_tool_comparisons"
+
 
 # -------------------------------------------------------------------------
 # Index definitions
@@ -152,6 +155,11 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
 
     # client_analysis_outputs — history of analysis narratives per client
     await db[CLIENT_ANALYSIS_OUTPUTS].create_index(
+        [("client_id", ASCENDING), ("created_at", DESCENDING)]
+    )
+
+    # insurance_tool_comparisons — saved comparison results per client
+    await db[INSURANCE_TOOL_COMPARISONS].create_index(
         [("client_id", ASCENDING), ("created_at", DESCENDING)]
     )
 

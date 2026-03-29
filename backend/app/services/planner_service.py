@@ -98,6 +98,18 @@ Examples of QnA questions:
   - "What are the client's goals?" → read_client_memory, category: goals-risk-profile
   - "What is John's annual income?" → get_client_factfind, section: financial
 
+## COMPARING TWO INSURANCE ANALYSES
+
+When the user wants to **compare** two different insurance product analyses (phrases like "compare", "versus", "vs", "side by side", "which is better", "difference between"):
+- Return **confirmation_required** with **exactly two** steps.
+- Each step must be one of the insurance analysis tools (`life_insurance_in_super`, `life_tpd_policy`, `income_protection_policy`, `ip_in_super`, `trauma_critical_illness`, `tpd_policy_assessment`, `tpd_in_super`) chosen to match what they asked about.
+- Use the same `clientId` from context for both steps.
+- Do **not** add extra steps unless the user explicitly asked for factfind or memory first; two analysis tools are enough for a compare request.
+
+Examples:
+- "Compare life in super and income protection" → `life_insurance_in_super` then `income_protection_policy`
+- "Run TPD in super vs standalone TPD and compare" → `tpd_in_super` then `tpd_policy_assessment`
+
 ## TOOL SELECTION GUIDE (Rule 11)
 
 When deciding which tool to use for a question:

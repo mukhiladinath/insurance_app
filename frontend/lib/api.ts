@@ -418,3 +418,88 @@ export function searchClientMemory(
     `/api/client-context/${clientId}/search?query=${encodeURIComponent(query)}`
   );
 }
+
+// ---------------------------------------------------------------------------
+// Insurance comparison (saved tool runs)
+// ---------------------------------------------------------------------------
+
+export interface InsuranceToolRunListItem {
+  toolRunId: string;
+  savedRunId: string;
+  stepId: string;
+  toolName: string;
+  savedRunName: string;
+  savedAt: string | null;
+  label: string;
+  hasNormalizedEnvelope: boolean;
+  sourceKind?: 'workspace_save' | 'saved_analysis';
+}
+
+export function listInsuranceToolRuns(clientId: string, limit = 100): Promise<InsuranceToolRunListItem[]> {
+  const q = new URLSearchParams({ client_id: clientId, limit: String(limit) });
+  return request<InsuranceToolRunListItem[]>(`/api/insurance-comparison/tool-runs?${q}`);
+}
+
+export interface InsuranceComparePayload {
+  clientId: string;
+  leftToolRunId: string;
+  rightToolRunId: string;
+  weights?: Record<string, number> | null;
+  factFindVersion?: string | number | null;
+}
+
+export function compareInsuranceToolRuns(payload: InsuranceComparePayload): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>('/api/insurance-comparison/compare', {
+    method: 'POST',
+    body: JSON.stringify({
+      clientId: payload.clientId,
+      leftToolRunId: payload.leftToolRunId,
+      rightToolRunId: payload.rightToolRunId,
+      weights: payload.weights ?? undefined,
+      factFindVersion: payload.factFindVersion ?? undefined,
+      createdBy: USER_ID,
+    }),
+  });
+}
+
+export function saveInsuranceComparison(payload: {
+  clientId: string;
+  leftToolRunId: string;
+  rightToolRunId: string;
+  comparisonType?: string;
+  comparisonResult: Record<string, unknown>;
+  factFindVersion?: string | number | null;
+}): Promise<{ ok: boolean; id: string }> {
+  return request<{ ok: boolean; id: string }>('/api/insurance-comparison/save', {
+    method: 'POST',
+    body: JSON.stringify({
+      clientId: payload.clientId,
+      leftToolRunId: payload.leftToolRunId,
+      rightToolRunId: payload.rightToolRunId,
+      comparisonType: payload.comparisonType ?? 'manual',
+      comparisonResult: payload.comparisonResult,
+      factFindVersion: payload.factFindVersion ?? undefined,
+      createdBy: USER_ID,
+    }),
+  });
+}
+
+export interface SavedInsuranceComparisonSummary {
+  id: string;
+  clientId: string;
+  leftToolRunId: string;
+  rightToolRunId: string;
+  leftToolName: string;
+  rightToolName: string;
+  comparisonMode: string;
+  createdAt: string | null;
+}
+
+export function listSavedInsuranceComparisons(clientId: string, limit = 50): Promise<SavedInsuranceComparisonSummary[]> {
+  const q = new URLSearchParams({ client_id: clientId, limit: String(limit) });
+  return request<SavedInsuranceComparisonSummary[]>(`/api/insurance-comparison/list?${q}`);
+}
+
+export function getSavedInsuranceComparison(comparisonId: string): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/api/insurance-comparison/${comparisonId}`);
+}

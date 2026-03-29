@@ -266,6 +266,11 @@ async def run_objectives_automation(
         appendix_lines.append(f"#### `{tid}`\n\n```json\n{blob}\n```\n\n")
     content = f"## Automated analysis (from goals & objectives)\n\n{summary}" + "".join(appendix_lines)
 
+    structured = [
+        {"tool_id": r["tool_id"], "status": "completed", "output": r.get("payload") if isinstance(r.get("payload"), dict) else None}
+        for r in runs
+        if isinstance(r.get("payload"), dict)
+    ]
     await out_repo.create(
         client_id=client_id,
         instruction="Automated: goals & objectives (merged insurance engines)",
@@ -273,6 +278,7 @@ async def run_objectives_automation(
         step_labels=step_labels,
         content=content,
         source="automated",
+        structured_step_results=structured,
     )
 
     await ws_repo.set_objectives_automation_fingerprint(client_id, fp)

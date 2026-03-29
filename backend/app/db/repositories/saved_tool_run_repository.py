@@ -138,6 +138,18 @@ class SavedToolRunRepository:
         result = await self._col.delete_one({"_id": oid})
         return result.deleted_count > 0
 
+    async def update_step_results(self, saved_run_id: str, step_results: list[dict]) -> dict | None:
+        """Replace step_results (e.g. after attaching comparison_envelope)."""
+        oid = to_object_id(saved_run_id)
+        if oid is None:
+            return None
+        doc = await self._col.find_one_and_update(
+            {"_id": oid},
+            {"$set": {"step_results": step_results, "updated_at": utc_now()}},
+            return_document=True,
+        )
+        return _serialize(doc) if doc else None
+
     async def update_name(
         self, saved_run_id: str, name: str, tags: list[str]
     ) -> dict | None:

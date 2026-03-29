@@ -42,6 +42,7 @@ class ClientAnalysisOutputRepository:
         step_labels: list[str],
         content: str,
         source: str = "manual",
+        structured_step_results: list[dict[str, Any]] | None = None,
     ) -> dict:
         now = utc_now()
         doc = {
@@ -51,6 +52,7 @@ class ClientAnalysisOutputRepository:
             "step_labels": step_labels,
             "content": content,
             "source": source,
+            "structured_step_results": structured_step_results or [],
             "created_at": now,
             "updated_at": now,
         }

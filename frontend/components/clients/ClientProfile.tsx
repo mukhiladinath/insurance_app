@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { ArrowLeft, RefreshCw, FileText, Loader2 } from 'lucide-react';
 import { useClientStore } from '../../store/client-store';
 import ClientInfoPanel from './ClientInfoPanel';
@@ -19,7 +19,12 @@ export default function ClientProfile() {
     loadDocuments,
   } = useClientStore();
 
-  const { pendingFactFindSection, clearFactFindRequest, requestFactFind } = useClientStore();
+  const { pendingFactFindSection, clearFactFindRequest, requestFactFind, pendingInsuranceComparison } =
+    useClientStore();
+
+  const handlePreloadedComparisonConsumed = useCallback(() => {
+    useClientStore.getState().clearInsuranceComparisonRequest();
+  }, []);
 
   const handleRefresh = () => {
     if (activeClientId) {
@@ -129,9 +134,14 @@ export default function ClientProfile() {
           <ClientInfoPanel
             workspace={activeWorkspace}
             documents={activeDocuments}
-            initialTab={pendingFactFindSection ? 'factfind' : undefined}
+            initialTab={pendingInsuranceComparison ? 'compare' : pendingFactFindSection ? 'factfind' : undefined}
             factFindSection={pendingFactFindSection ?? undefined}
-            onTabConsumed={clearFactFindRequest}
+            onTabConsumed={() => {
+              if (pendingInsuranceComparison) return;
+              clearFactFindRequest();
+            }}
+            preloadedInsuranceComparison={pendingInsuranceComparison}
+            onPreloadedComparisonConsumed={handlePreloadedComparisonConsumed}
             clientId={activeClientId}
           />
         )}

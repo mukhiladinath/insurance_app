@@ -25,12 +25,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/clients", tags=["client-analysis-outputs"])
 
 
+class StructuredStepResultIn(BaseModel):
+    """One completed insurance tool row from the orchestrator (short tool_id + raw output)."""
+
+    tool_id: str
+    status: str = "completed"
+    output: dict[str, Any] | None = None
+
+
 class AnalysisOutputCreate(BaseModel):
     instruction: str = ""
     tool_ids: list[str] = Field(default_factory=list)
     step_labels: list[str] = Field(default_factory=list)
     content: str = ""
     source: str = "manual"
+    structured_step_results: list[StructuredStepResultIn] = Field(default_factory=list)
 
 
 class AnalysisOutputPatch(BaseModel):
@@ -82,6 +91,7 @@ async def create_analysis_output(client_id: str, body: AnalysisOutputCreate):
     await _require_client(client_id)
     db = get_db()
     repo = ClientAnalysisOutputRepository(db)
+    structured = [s.model_dump() for s in body.structured_step_results]
     doc = await repo.create(
         client_id=client_id,
         instruction=body.instruction,
@@ -89,6 +99,7 @@ async def create_analysis_output(client_id: str, body: AnalysisOutputCreate):
         step_labels=body.step_labels,
         content=body.content,
         source=body.source if body.source in ("manual", "automated") else "manual",
+        structured_step_results=structured,
     )
     return _to_out(doc)
 

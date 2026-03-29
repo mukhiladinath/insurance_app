@@ -81,7 +81,18 @@ interface ClientStore {
   pendingFactFindSection: string | null;
   requestFactFind: (section?: string) => void;
   clearFactFindRequest: () => void;
+
+  /** After AI bar runs two comparable tools, open Compare with this payload (cleared by InsuranceComparisonPanel). */
+  pendingInsuranceComparison: PendingInsuranceComparison | null;
+  requestInsuranceComparisonView: (payload: PendingInsuranceComparison) => void;
+  clearInsuranceComparisonRequest: () => void;
 }
+
+export type PendingInsuranceComparison = {
+  result: Record<string, unknown>;
+  leftToolRunId: string;
+  rightToolRunId: string;
+};
 
 export const useClientStore = create<ClientStore>()(
   persist(
@@ -101,6 +112,7 @@ export const useClientStore = create<ClientStore>()(
 
   backendStatus: { backend: 'connecting', model: 'Insurance AI', toolsAvailable: 0 },
   pendingFactFindSection: null,
+  pendingInsuranceComparison: null,
 
   // ---- Load all clients ----
   loadClients: async () => {
@@ -222,6 +234,10 @@ export const useClientStore = create<ClientStore>()(
   // ---- Fact Find navigation requests ----
   requestFactFind: (section) => set({ pendingFactFindSection: section ?? 'personal' }),
   clearFactFindRequest: () => set({ pendingFactFindSection: null }),
+
+  requestInsuranceComparisonView: (payload) =>
+    set({ pendingInsuranceComparison: payload, pendingFactFindSection: null }),
+  clearInsuranceComparisonRequest: () => set({ pendingInsuranceComparison: null }),
 
   // ---- Manually update facts (from FactFind form save) ----
   updateFacts: async (clientId, facts) => {

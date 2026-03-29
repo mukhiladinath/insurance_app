@@ -14,7 +14,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { TOOL_HANDLERS, resolveParameters } from '@/lib/tools/orchestrator-handlers';
 import type { ToolContext } from '@/lib/tools/orchestrator-handlers';
 import type { MissingFieldsSignal } from '@/lib/tools/orchestrator-handlers';
-import { runIncludesAnalysisTool } from '@/lib/orchestrator-analysis-tools';
+import {
+  runIncludesAnalysisTool,
+  COMPARABLE_INSURANCE_TOOL_IDS,
+} from '@/lib/orchestrator-analysis-tools';
 
 const BACKEND = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -148,8 +151,28 @@ export async function POST(req: NextRequest) {
       console.error('summarize call failed:', err);
     }
 
-    const responseBody = {
-      type: 'execution_complete' as const,
+    const structured_step_results = stepResults
+      .filter(
+        (r) =>
+          r.status === 'completed' &&
+          COMPARABLE_INSURANCE_TOOL_IDS.has(r.tool_id) &&
+          r.result !== null &&
+          typeof r.result === 'object' &&
+          !Array.isArray(r.result),
+      )
+      .map((r) => ({
+        tool_id: r.tool_id,
+        status: 'completed' as const,
+        output: r.result as Record<string, unknown>,
+      }));
+
+    const responseBody: {
+      type: 'execution_complete';
+      step_results: StepRecord[];
+      synthesized_response: string;
+      analysis_output_id?: string;
+    } = {
+      type: 'execution_complete',
       step_results: stepResults,
       synthesized_response: summary,
     };
@@ -166,7 +189,7 @@ export async function POST(req: NextRequest) {
         summary.trim() ||
         '_No summary was generated; expand the step results above or re-run with a shorter plan._';
       try {
-        await fetch(`${BACKEND}/api/clients/${clientId}/analysis-outputs`, {
+        const persistRes = await fetch(`${BACKEND}/api/clients/${clientId}/analysis-outputs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -174,8 +197,15 @@ export async function POST(req: NextRequest) {
             tool_ids: toolIds,
             step_labels: labels,
             content,
+            structured_step_results,
           }),
         });
+        if (persistRes.ok) {
+          const created = (await persistRes.json()) as { id?: string };
+          if (created?.id) {
+            responseBody.analysis_output_id = created.id;
+          }
+        }
       } catch (e) {
         console.error('Failed to persist analysis output:', e);
       }

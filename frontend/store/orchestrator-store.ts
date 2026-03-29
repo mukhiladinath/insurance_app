@@ -26,6 +26,9 @@ import type {
   MissingFieldDef,
   PendingResume,
 } from '../lib/types';
+import { compareInsuranceToolRuns } from '../lib/api';
+import { instructionSuggestsInsuranceCompare } from '../lib/compare-intent';
+import { COMPARABLE_INSURANCE_TOOL_IDS } from '../lib/orchestrator-analysis-tools';
 import { useClientStore } from './client-store';
 
 // ---------------------------------------------------------------------------
@@ -455,6 +458,9 @@ async function _executeConfirm(
 
     // Reload workspace so UI reflects any factfind changes made by tools
     const clientId = get().currentContext.selectedClientId;
+    const instruction = get().currentInstruction;
+    const outputId = (data as { analysis_output_id?: string }).analysis_output_id;
+
     if (clientId) {
       useClientStore.getState().loadWorkspace(clientId).catch(() => {});
       _backgroundSyncMemory(clientId);
@@ -462,6 +468,33 @@ async function _executeConfirm(
         window.dispatchEvent(
           new CustomEvent('client-analysis-outputs-changed', { detail: { clientId } }),
         );
+      }
+
+      const comparableDone = executedResults.filter(
+        (r) => r.status === 'completed' && COMPARABLE_INSURANCE_TOOL_IDS.has(r.tool_id),
+      );
+      if (
+        outputId &&
+        instructionSuggestsInsuranceCompare(instruction) &&
+        comparableDone.length >= 2
+      ) {
+        const leftToolRunId = `analysisoutput:${outputId}:0`;
+        const rightToolRunId = `analysisoutput:${outputId}:1`;
+        void compareInsuranceToolRuns({
+          clientId,
+          leftToolRunId,
+          rightToolRunId,
+        })
+          .then((result) => {
+            useClientStore.getState().requestInsuranceComparisonView({
+              result,
+              leftToolRunId,
+              rightToolRunId,
+            });
+          })
+          .catch(() => {
+            // Non-fatal — user can run compare manually from the Compare tab
+          });
       }
     }
   } catch (err) {
