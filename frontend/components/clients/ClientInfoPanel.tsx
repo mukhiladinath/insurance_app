@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import {
-  User, DollarSign, Shield, Heart, Target, FileText, ExternalLink, TrendingUp, Clock, ClipboardList, Brain,
-  ScrollText, GitCompare,
+  User, DollarSign, Shield, Heart, FileText, ExternalLink, ClipboardList, Brain,
+  ScrollText, GitCompare, LayoutDashboard,
 } from 'lucide-react';
-import type { ClientWorkspace, ConversationDocument, AdvisoryNote } from '../../lib/types';
+import type { ClientWorkspace, ConversationDocument } from '../../lib/types';
 import { EMPTY_CLIENT_FACTS } from '../../lib/types';
 import { formatTimestamp, parseUTCDate, formatFileSize } from '../../lib/utils';
 import { getDocumentUrl } from '../../lib/api';
@@ -13,8 +13,9 @@ import FactFind from './FactFind';
 import AIContextPanel from '../ai/AIContextPanel';
 import SavedAnalysesPanel from './SavedAnalysesPanel';
 import InsuranceComparisonPanel from './InsuranceComparisonPanel';
+import InsuranceDashboardsPanel from './InsuranceDashboardsPanel';
 import ObjectivesAutomationStatus from './ObjectivesAutomationStatus';
-import type { PendingInsuranceComparison } from '../../store/client-store';
+import type { PendingInsuranceComparison, PendingInsuranceDashboard } from '../../store/client-store';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,45 +56,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 // ---------------------------------------------------------------------------
-// Advisory verdict badge
-// ---------------------------------------------------------------------------
-
-function VerdictBadge({ verdict }: { verdict: string }) {
-  const v = verdict.toUpperCase();
-  const colors: Record<string, string> = {
-    REPLACE: 'bg-orange-50 text-orange-700 border-orange-200',
-    PURCHASE: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    RETAIN: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    KEEP: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    PERMITTED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    MUST_BE_SWITCHED_OFF: 'bg-red-50 text-red-700 border-red-200',
-    NOT_RECOMMENDED: 'bg-red-50 text-red-700 border-red-200',
-    COMPLETED: 'bg-slate-50 text-slate-600 border-slate-200',
-    UNKNOWN: 'bg-slate-50 text-slate-400 border-slate-200',
-  };
-  const cls = colors[v] || 'bg-slate-50 text-slate-600 border-slate-200';
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${cls}`}>
-      {verdict}
-    </span>
-  );
-}
-
-const TOOL_LABELS: Record<string, string> = {
-  purchase_retain_life_insurance_in_super: 'Life Insurance in Super',
-  purchase_retain_life_tpd_policy: 'Life & TPD Policy',
-  purchase_retain_income_protection_policy: 'Income Protection',
-  purchase_retain_ip_in_super: 'Income Protection in Super',
-  purchase_retain_trauma_ci_policy: 'Trauma / Critical Illness',
-  tpd_policy_assessment: 'TPD Policy Assessment',
-  purchase_retain_tpd_in_super: 'TPD in Super',
-};
-
-// ---------------------------------------------------------------------------
 // Tab definitions
 // ---------------------------------------------------------------------------
 
-type Tab = 'factfind' | 'personal' | 'financial' | 'insurance' | 'health' | 'advisory' | 'documents' | 'saved-analyses' | 'compare' | 'ai-memory';
+type Tab = 'factfind' | 'personal' | 'financial' | 'insurance' | 'health' | 'documents' | 'saved-analyses' | 'compare' | 'dashboards' | 'ai-memory';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'factfind',   label: 'Fact Find',  icon: <ClipboardList size={14} /> },
@@ -101,10 +67,10 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'financial',  label: 'Financial',  icon: <DollarSign size={14} /> },
   { id: 'insurance',  label: 'Insurance',  icon: <Shield size={14} /> },
   { id: 'health',     label: 'Health',     icon: <Heart size={14} /> },
-  { id: 'advisory',   label: 'Advisory',   icon: <TrendingUp size={14} /> },
   { id: 'documents',  label: 'Documents',  icon: <FileText size={14} /> },
   { id: 'saved-analyses', label: 'Saved analyses', icon: <ScrollText size={14} /> },
   { id: 'compare',      label: 'Compare',      icon: <GitCompare size={14} /> },
+  { id: 'dashboards',   label: 'Dashboards',   icon: <LayoutDashboard size={14} /> },
   { id: 'ai-memory',  label: 'AI Memory',  icon: <Brain size={14} /> },
 ];
 
@@ -185,61 +151,6 @@ function HealthTab({ facts }: { facts: Record<string, unknown> }) {
   );
 }
 
-function AdvisoryTab({ notes, summary }: { notes: Record<string, AdvisoryNote>; summary: string }) {
-  const entries = Object.entries(notes);
-  return (
-    <div className="space-y-4">
-      {summary && (
-        <Section title="Conversation Summary">
-          <p className="text-sm text-slate-700 py-3 leading-relaxed">{summary}</p>
-        </Section>
-      )}
-
-      {entries.length === 0 && !summary && (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-          <TrendingUp size={28} className="text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500 text-sm">No analyses yet.</p>
-          <p className="text-slate-400 text-xs mt-1">Run an analysis using the AI bar below.</p>
-        </div>
-      )}
-
-      {entries.map(([toolName, note]) => (
-        <div key={toolName} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-700">
-              {TOOL_LABELS[toolName] ?? toolName}
-            </h3>
-            <div className="flex items-center gap-2">
-              <VerdictBadge verdict={note.verdict} />
-              <span className="text-xs text-slate-400 flex items-center gap-1">
-                <Clock size={10} />
-                {note.analysed_at ? formatTimestamp(parseUTCDate(note.analysed_at)) : ''}
-              </span>
-            </div>
-          </div>
-          <div className="px-5 py-4">
-            {note.recommendation && (
-              <p className="text-sm font-medium text-slate-800 mb-2">{note.recommendation}</p>
-            )}
-            {note.key_findings && (
-              <p className="text-sm text-slate-600 leading-relaxed">{note.key_findings}</p>
-            )}
-            {Object.keys(note.key_numbers ?? {}).length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {Object.entries(note.key_numbers).map(([k, v]) => v != null && (
-                  <span key={k} className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs">
-                    {k.replace(/_/g, ' ')}: <span className="font-semibold">{formatValue(v)}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function DocumentsTab({ documents }: { documents: ConversationDocument[] }) {
   const iconColor: Record<string, string> = {
     'application/pdf': 'text-red-500',
@@ -292,6 +203,8 @@ interface Props {
   onTabConsumed?: () => void;
   preloadedInsuranceComparison?: PendingInsuranceComparison | null;
   onPreloadedComparisonConsumed?: () => void;
+  preloadedInsuranceDashboard?: PendingInsuranceDashboard | null;
+  onPreloadedDashboardConsumed?: () => void;
   clientId?: string | null;
 }
 
@@ -303,24 +216,29 @@ export default function ClientInfoPanel({
   onTabConsumed,
   preloadedInsuranceComparison,
   onPreloadedComparisonConsumed,
+  preloadedInsuranceDashboard,
+  onPreloadedDashboardConsumed,
   clientId,
 }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? 'factfind');
 
-  // Jump to Compare when AI bar finished a compare run; otherwise honour initialTab (e.g. Fact Find).
+  // Jump to Compare / Dashboards when AI bar finished; otherwise honour initialTab (e.g. Fact Find).
   useEffect(() => {
+    if (preloadedInsuranceDashboard) {
+      setActiveTab('dashboards');
+      return;
+    }
     if (preloadedInsuranceComparison) {
       setActiveTab('compare');
       return;
     }
     if (initialTab) {
       setActiveTab(initialTab);
-      if (initialTab !== 'compare') onTabConsumed?.();
+      if (initialTab !== 'compare' && initialTab !== 'dashboards') onTabConsumed?.();
     }
-  }, [initialTab, preloadedInsuranceComparison, onTabConsumed]);
+  }, [initialTab, preloadedInsuranceComparison, preloadedInsuranceDashboard, onTabConsumed]);
 
   const facts = workspace?.client_facts ?? EMPTY_CLIENT_FACTS;
-  const advisoryNotes = workspace?.advisory_notes ?? {};
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -351,7 +269,6 @@ export default function ClientInfoPanel({
         {activeTab === 'financial' && <FinancialTab facts={facts.financial} />}
         {activeTab === 'insurance' && <InsuranceTab facts={facts.insurance} />}
         {activeTab === 'health'    && <HealthTab facts={facts.health} />}
-        {activeTab === 'advisory'  && <AdvisoryTab notes={advisoryNotes} summary={workspace?.summary ?? ''} />}
         {activeTab === 'documents' && <DocumentsTab documents={documents} />}
         {activeTab === 'saved-analyses' && clientId && <SavedAnalysesPanel clientId={clientId} />}
         {activeTab === 'saved-analyses' && !clientId && (
@@ -366,6 +283,16 @@ export default function ClientInfoPanel({
         )}
         {activeTab === 'compare' && !clientId && (
           <div className="text-sm text-slate-400 py-8 text-center">Save the client first to compare tool outputs.</div>
+        )}
+        {activeTab === 'dashboards' && clientId && (
+          <InsuranceDashboardsPanel
+            clientId={clientId}
+            preloaded={preloadedInsuranceDashboard ?? null}
+            onPreloadedConsumed={onPreloadedDashboardConsumed}
+          />
+        )}
+        {activeTab === 'dashboards' && !clientId && (
+          <div className="text-sm text-slate-400 py-8 text-center">Save the client first to view dashboards.</div>
         )}
         {activeTab === 'ai-memory' && clientId && <AIContextPanel clientId={clientId} />}
         {activeTab === 'ai-memory' && !clientId && (

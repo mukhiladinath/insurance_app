@@ -69,3 +69,39 @@ async def test_infer_falls_back_when_llm_empty(monkeypatch):
 
     out = await infer_tool_ids_from_objectives("Client wants income protection.")
     assert "purchase_retain_income_protection_policy" in out
+
+
+@pytest.mark.asyncio
+async def test_try_generate_insurance_dashboard_after_automation(monkeypatch):
+    called: dict[str, str | None] = {}
+
+    async def fake_generate(db, **kwargs):
+        called["analysis_output_id"] = kwargs.get("analysis_output_id")
+        return {"status": "complete", "dashboard": {"id": "dash_auto_1"}}
+
+    monkeypatch.setattr(
+        "app.services.insurance_dashboard.service.generate_insurance_dashboard",
+        fake_generate,
+    )
+    from app.services.objectives_automation_service import (
+        _try_generate_insurance_dashboard_after_automation,
+    )
+
+    class _DummyDb:
+        pass
+
+    out = await _try_generate_insurance_dashboard_after_automation(_DummyDb(), "client_x", "output_y")
+    assert out["insurance_dashboard_created"] is True
+    assert out["insurance_dashboard_id"] == "dash_auto_1"
+    assert called["analysis_output_id"] == "output_y"
+
+
+@pytest.mark.asyncio
+async def test_try_generate_insurance_dashboard_no_id(monkeypatch):
+    from app.services.objectives_automation_service import (
+        _try_generate_insurance_dashboard_after_automation,
+    )
+
+    out = await _try_generate_insurance_dashboard_after_automation(None, "c", None)
+    assert out["insurance_dashboard_created"] is False
+    assert out["insurance_dashboard_id"] is None

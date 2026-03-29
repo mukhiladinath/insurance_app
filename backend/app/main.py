@@ -24,7 +24,7 @@ from app.agents.graph import get_graph
 from app.agents.orchestrator_graph import get_orchestrator_graph
 from app.agents.workspace_graph import get_workspace_graph
 from app.api.routes import health, chat, conversations, tools, upload, soa, agent
-from app.api.routes import clients, workspace, insurance_comparison
+from app.api.routes import clients, workspace, insurance_comparison, insurance_dashboard
 from app.api.routes import client_context, orchestrator_planner, client_analysis_outputs
 
 logging.basicConfig(
@@ -109,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(client_context.router, prefix=prefix)
     app.include_router(orchestrator_planner.router, prefix=prefix)
     app.include_router(client_analysis_outputs.router, prefix=prefix)
+    app.include_router(insurance_dashboard.router, prefix=prefix)
 
     return app
 

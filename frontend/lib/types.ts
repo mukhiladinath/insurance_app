@@ -426,4 +426,6 @@ export interface PendingResume {
   // Missing fields still to collect (tail)
   pendingMissingFields: MissingFieldDef[];
   collectedOverrides: Record<string, unknown>; // canonical_path → value
+  /** Resume token for insurance dashboard missing-field flow */
+  sessionToken?: string;
 }

@@ -339,6 +339,9 @@ export interface ObjectivesAutomationResult {
   reason: string;
   tools_run: string[];
   outputs_created: number;
+  /** Set when automation saved an analysis and dashboard generation completed */
+  insurance_dashboard_created?: boolean;
+  insurance_dashboard_id?: string | null;
 }
 
 /** Run insurance tools inferred from fact-find Goals & objectives (deduped by text fingerprint). */

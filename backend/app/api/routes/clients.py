@@ -220,6 +220,8 @@ async def patch_factfind(client_id: str, req: PatchFactfindRequest):
             changed_by="user",
         )
         return _to_factfind_out(updated)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("patch_factfind error: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to update factfind.")
@@ -431,6 +433,8 @@ class ObjectivesAutomationRunOut(BaseModel):
     reason: str = ""
     tools_run: list[str] = []
     outputs_created: int = 0
+    insurance_dashboard_created: bool = False
+    insurance_dashboard_id: str | None = None
 
 
 @router.post("/{client_id}/objectives-automation/run", response_model=ObjectivesAutomationRunOut)
@@ -442,6 +446,9 @@ async def run_objectives_automation_route(
     If fact-find **Goals & objectives** text is non-empty, infer matching insurance
     tools, run them with current factfind (+ memory hints), and save one analysis
     output per tool with source=automated.
+
+    When a merged automated analysis is saved, also attempts **insurance dashboard**
+    generation from that output (may be skipped if required fields are missing).
 
     Skips when objectives text unchanged since last run unless `force` is true.
     """

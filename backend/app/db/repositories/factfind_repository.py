@@ -45,6 +45,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.db import collections as col
 from app.utils.timestamps import utc_now
 from app.utils.ids import to_object_id
+from app.utils.factfind_changes import count_valid_factfind_paths, normalize_factfind_changes
+from app.services.factfind_conversation_memory_sync import sync_factfind_changes_to_conversation_memory
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,7 @@ def _empty_factfind(client_id: str) -> dict:
 
 class FactfindRepository:
     def __init__(self, db: AsyncIOMotorDatabase):
+        self._db = db
         self._col = db[col.FACTFINDS]
         self._log = db[col.FACTFIND_CHANGE_LOG]
 
@@ -108,16 +111,24 @@ class FactfindRepository:
         """
         Apply field-level changes to the factfind.
         changes: { "personal.age": 42, "financial.super_balance": 150000 }
+        Nested section dicts (e.g. {"financial": {"super_balance": 1}}) are normalized first.
         Each change becomes a confirmed field entry with full metadata.
         Also writes a factfind_change_log entry per field.
         """
         now = utc_now()
         existing = await self.get_or_create(client_id)
 
+        normalized = normalize_factfind_changes(changes)
+        if count_valid_factfind_paths(normalized) == 0:
+            raise ValueError(
+                "No valid factfind field paths in changes. Use dotted keys like "
+                '"financial.annual_gross_income" or nest under section names.'
+            )
+
         set_ops: dict[str, Any] = {"updated_at": now}
         log_entries: list[dict] = []
 
-        for field_path, new_value in changes.items():
+        for field_path, new_value in normalized.items():
             parts = field_path.split(".", 1)
             if len(parts) != 2:
                 logger.warning("factfind_repository: invalid field_path %s", field_path)
@@ -164,6 +175,10 @@ class FactfindRepository:
 
         if log_entries:
             await self._log.insert_many(log_entries)
+
+        await sync_factfind_changes_to_conversation_memory(
+            self._db, client_id, normalized
+        )
 
         return _serialize(doc)
 

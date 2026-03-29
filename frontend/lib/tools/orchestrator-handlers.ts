@@ -12,6 +12,7 @@ import {
   dispatchObjectivesAutomationStart,
   dispatchObjectivesAutomationDone,
 } from '../objectives-automation-events';
+import { useClientStore } from '../../store/client-store';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -106,6 +107,23 @@ async function runObjectivesAutomationAfterGoalsWritten(clientId: string): Promi
         reason: body.reason ?? '',
         tools_run: body.tools_run ?? [],
         outputs_created: body.outputs_created ?? 0,
+        insurance_dashboard_created: body.insurance_dashboard_created,
+        insurance_dashboard_id: body.insurance_dashboard_id,
+      });
+    }
+    if (
+      typeof window !== 'undefined' &&
+      autoRes.ok &&
+      body.insurance_dashboard_id
+    ) {
+      window.dispatchEvent(
+        new CustomEvent('insurance-dashboard-created', {
+          detail: { clientId, dashboardId: body.insurance_dashboard_id },
+        }),
+      );
+      useClientStore.getState().requestInsuranceDashboardView({
+        clientId,
+        dashboardId: body.insurance_dashboard_id,
       });
     }
   } catch {
@@ -145,15 +163,24 @@ async function get_client_factfind(
 
 async function update_client_factfind(
   params: Record<string, unknown>,
-  _ctx: ToolContext,
+  ctx: ToolContext,
 ): Promise<ToolResult> {
+  const clientId = (params.clientId as string) || ctx.clientId || '';
+  const changes = (params.changes ?? {}) as Record<string, unknown>;
+  if (!clientId) {
+    return {
+      status: 'error',
+      error: 'No client selected — cannot update fact find. Pick a client in the workspace first.',
+    };
+  }
+  if (!changes || Object.keys(changes).length === 0) {
+    return {
+      status: 'error',
+      error:
+        'No field changes were provided — fact find was not updated. The plan must include a non-empty `changes` object with dotted paths (e.g. financial.annual_gross_income).',
+    };
+  }
   return runHandler(async () => {
-    const clientId = params.clientId as string;
-    const changes = (params.changes ?? {}) as Record<string, unknown>;
-    // Skip the API call if there are no actual changes to write
-    if (!changes || Object.keys(changes).length === 0) {
-      return { skipped: true, reason: 'No changes provided — factfind not modified.' };
-    }
     const result = await apiFetch<unknown>(`/api/clients/${clientId}/factfind`, {
       method: 'PATCH',
       body: JSON.stringify({ changes }),
@@ -226,6 +253,7 @@ export interface MissingFieldsSignal {
   backend_tool_name: string;
   params: { clientId: string };
   partial_input: Record<string, unknown>;
+  session_token?: string;
 }
 
 async function runInsuranceTool(
@@ -358,6 +386,62 @@ async function extract_factfind_from_document(
 // SOA handler
 // ---------------------------------------------------------------------------
 
+async function generate_insurance_dashboard(
+  params: Record<string, unknown>,
+  _ctx: ToolContext,
+): Promise<ToolResult> {
+  const clientId = params.clientId as string;
+  const overrides = (params._overrides ?? {}) as Record<string, unknown>;
+  const sessionToken = (params._session_token as string | undefined) || undefined;
+  const start = Date.now();
+  try {
+    const res = await fetch(`${BASE}/api/clients/${clientId}/insurance-dashboards/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instruction: (params.instruction as string) ?? null,
+        dashboard_type: (params.dashboard_type as string) ?? null,
+        analysis_output_id: (params.analysis_output_id as string) ?? null,
+        step_index: typeof params.step_index === 'number' ? params.step_index : null,
+        second_analysis_output_id: (params.second_analysis_output_id as string) ?? null,
+        second_step_index: typeof params.second_step_index === 'number' ? params.second_step_index : null,
+        session_token: sessionToken ?? null,
+        overrides,
+      }),
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok) {
+      const detail = data?.detail;
+      const msg =
+        typeof detail === 'object' && detail !== null && 'message' in detail
+          ? String((detail as { message?: string }).message)
+          : typeof detail === 'string'
+            ? detail
+            : `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    if (data.status === 'missing_fields') {
+      const mf = (data.missing_fields as MissingFieldsSignal['missing_fields']) ?? [];
+      const signal: MissingFieldsSignal = {
+        _missing_fields: true,
+        missing_fields: mf,
+        backend_tool_name: 'generate_insurance_dashboard',
+        params: { clientId },
+        partial_input: (data.partial_resolved as Record<string, unknown>) ?? {},
+        session_token: typeof data.session_token === 'string' ? data.session_token : undefined,
+      };
+      return { status: 'success', data: signal, duration_ms: Date.now() - start };
+    }
+    return { status: 'success', data, duration_ms: Date.now() - start };
+  } catch (err) {
+    return {
+      status: 'error',
+      error: err instanceof Error ? err.message : String(err),
+      duration_ms: Date.now() - start,
+    };
+  }
+}
+
 async function generate_soa(
   params: { clientId: string },
   _ctx: ToolContext,
@@ -400,6 +484,7 @@ export const TOOL_HANDLERS: Record<string, HandlerFn> = {
   tpd_in_super:              tpd_in_super as HandlerFn,
   generate_soa:              generate_soa as HandlerFn,
   extract_factfind_from_document: extract_factfind_from_document as HandlerFn,
+  generate_insurance_dashboard: generate_insurance_dashboard as HandlerFn,
 };
 
 // ---------------------------------------------------------------------------

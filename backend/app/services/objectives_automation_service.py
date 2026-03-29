@@ -33,6 +33,70 @@ logger = logging.getLogger(__name__)
 
 _FACTFIND_SECTIONS = ["personal", "financial", "insurance", "health", "goals"]
 
+
+def _insurance_dashboard_result_defaults() -> dict[str, Any]:
+    return {
+        "insurance_dashboard_created": False,
+        "insurance_dashboard_id": None,
+    }
+
+
+async def _try_generate_insurance_dashboard_after_automation(
+    db: AsyncIOMotorDatabase,
+    client_id: str,
+    analysis_output_id: str | None,
+) -> dict[str, Any]:
+    """
+    Build a persisted insurance dashboard from the analysis output we just saved.
+    Does not raise — failures are logged and returned as metadata.
+    """
+    out = _insurance_dashboard_result_defaults()
+    if not analysis_output_id:
+        return out
+    try:
+        from app.services.insurance_dashboard.service import (
+            DashboardGenerationError,
+            generate_insurance_dashboard,
+        )
+
+        result = await generate_insurance_dashboard(
+            db,
+            client_id=client_id,
+            user_id=None,
+            instruction="Automated after goals & objectives analysis",
+            dashboard_type="auto",
+            analysis_output_id=analysis_output_id,
+            step_index=None,
+            second_analysis_output_id=None,
+            second_step_index=None,
+            session_token=None,
+            overrides={},
+        )
+    except DashboardGenerationError as exc:
+        logger.info(
+            "objectives_automation: insurance dashboard skipped (%s): %s",
+            exc.code,
+            exc.message,
+        )
+        return out
+    except Exception as exc:
+        logger.warning("objectives_automation: insurance dashboard generation failed: %s", exc)
+        return out
+
+    if result.get("status") == "complete":
+        dash = result.get("dashboard") or {}
+        did = dash.get("id")
+        if did:
+            out["insurance_dashboard_created"] = True
+            out["insurance_dashboard_id"] = str(did)
+        return out
+    if result.get("status") == "missing_fields":
+        logger.info(
+            "objectives_automation: insurance dashboard needs more fields: %s",
+            result.get("missing_fields"),
+        )
+    return out
+
 # Stable execution order (user sees consistent sequencing)
 _INSURANCE_TOOL_ORDER = [
     "purchase_retain_life_tpd_policy",
@@ -179,6 +243,7 @@ async def run_objectives_automation(
             "reason": "goals_and_objectives is empty",
             "tools_run": [],
             "outputs_created": 0,
+            **_insurance_dashboard_result_defaults(),
         }
 
     fp = _objectives_fingerprint(objectives_text)
@@ -197,6 +262,7 @@ async def run_objectives_automation(
             "reason": "objectives unchanged since last automated run (use force=true to re-run)",
             "tools_run": [],
             "outputs_created": 0,
+            **_insurance_dashboard_result_defaults(),
         }
 
     tool_ids = await infer_tool_ids_from_objectives(objectives_text)
@@ -207,6 +273,7 @@ async def run_objectives_automation(
             "reason": "No insurance tools selected (LLM + heuristics); refine goals text or wording",
             "tools_run": [],
             "outputs_created": 0,
+            **_insurance_dashboard_result_defaults(),
         }
 
     canonical = await _canonical_facts_from_factfind(db, client_id)
@@ -242,6 +309,7 @@ async def run_objectives_automation(
             "reason": "No tools could be executed",
             "tools_run": tool_ids,
             "outputs_created": 0,
+            **_insurance_dashboard_result_defaults(),
         }
 
     summarizer_input = (
@@ -271,7 +339,7 @@ async def run_objectives_automation(
         for r in runs
         if isinstance(r.get("payload"), dict)
     ]
-    await out_repo.create(
+    saved_output = await out_repo.create(
         client_id=client_id,
         instruction="Automated: goals & objectives (merged insurance engines)",
         tool_ids=[r["tool_id"] for r in runs],
@@ -281,10 +349,15 @@ async def run_objectives_automation(
         structured_step_results=structured,
     )
 
+    dash_meta = await _try_generate_insurance_dashboard_after_automation(
+        db, client_id, saved_output.get("id")
+    )
+
     await ws_repo.set_objectives_automation_fingerprint(client_id, fp)
     return {
         "skipped": False,
         "reason": "",
         "tools_run": [r["tool_id"] for r in runs],
         "outputs_created": 1,
+        **dash_meta,
     }

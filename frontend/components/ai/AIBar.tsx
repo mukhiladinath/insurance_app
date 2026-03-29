@@ -26,6 +26,7 @@ const SLASH_COMMANDS = [
   { command: '/analyze-life-tpd', label: 'Analyse Life + TPD', description: 'Run combined life and TPD policy analysis' },
   { command: '/generate-soa', label: 'Generate Statement of Advice', description: 'Generate SOA document for this client' },
   { command: '/check-factfind', label: 'Check Fact Find', description: "Show client's fact find data" },
+  { command: '/update-factfind', label: 'Update Fact Find', description: 'Change a fact-find field (say what to set after sending)' },
   { command: '/check-insurance', label: 'Check Insurance Details', description: "Show client's existing insurance" },
   { command: '/check-goals', label: 'Check Goals & Risk Profile', description: "Show client's goals and risk profile" },
 ];
@@ -40,6 +41,7 @@ const COMMAND_EXPANSIONS: Record<string, string> = {
   '/analyze-life-tpd':       'Analyse life and TPD combined policy for this client',
   '/generate-soa':           'Generate a Statement of Advice for this client',
   '/check-factfind':         "Show me the fact find for this client",
+  '/update-factfind':        "Update this client's fact find: set personal occupation to ",
   '/check-insurance':        "What insurance does this client have?",
   '/check-goals':            "What are this client's goals and risk profile?",
 };

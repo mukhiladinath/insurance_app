@@ -86,12 +86,22 @@ interface ClientStore {
   pendingInsuranceComparison: PendingInsuranceComparison | null;
   requestInsuranceComparisonView: (payload: PendingInsuranceComparison) => void;
   clearInsuranceComparisonRequest: () => void;
+
+  pendingInsuranceDashboard: PendingInsuranceDashboard | null;
+  requestInsuranceDashboardView: (payload: PendingInsuranceDashboard) => void;
+  clearInsuranceDashboardRequest: () => void;
 }
 
 export type PendingInsuranceComparison = {
   result: Record<string, unknown>;
   leftToolRunId: string;
   rightToolRunId: string;
+};
+
+/** Open Insurance dashboards tab with this dashboard selected (cleared by InsuranceDashboardsPanel). */
+export type PendingInsuranceDashboard = {
+  clientId: string;
+  dashboardId: string;
 };
 
 export const useClientStore = create<ClientStore>()(
@@ -113,6 +123,7 @@ export const useClientStore = create<ClientStore>()(
   backendStatus: { backend: 'connecting', model: 'Insurance AI', toolsAvailable: 0 },
   pendingFactFindSection: null,
   pendingInsuranceComparison: null,
+  pendingInsuranceDashboard: null,
 
   // ---- Load all clients ----
   loadClients: async () => {
@@ -238,6 +249,10 @@ export const useClientStore = create<ClientStore>()(
   requestInsuranceComparisonView: (payload) =>
     set({ pendingInsuranceComparison: payload, pendingFactFindSection: null }),
   clearInsuranceComparisonRequest: () => set({ pendingInsuranceComparison: null }),
+
+  requestInsuranceDashboardView: (payload) =>
+    set({ pendingInsuranceDashboard: payload, pendingFactFindSection: null }),
+  clearInsuranceDashboardRequest: () => set({ pendingInsuranceDashboard: null }),
 
   // ---- Manually update facts (from FactFind form save) ----
   updateFacts: async (clientId, facts) => {

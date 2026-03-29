@@ -66,8 +66,11 @@ export default function ObjectivesAutomationStatus({ clientId }: { clientId: str
               <li>Reading your Goals &amp; objectives and selecting insurance engines (LLM)</li>
               <li>Running calculations for each selected engine</li>
               <li>Writing one merged summary to Saved analyses</li>
+              <li>Building your insurance projection dashboard (Dashboards tab) when data allows</li>
             </ul>
-            <p className="mt-2 text-xs text-indigo-600">This often takes 30–90 seconds. You can switch tabs; status stays here.</p>
+            <p className="mt-2 text-xs text-indigo-600">
+              This often takes 30–90 seconds. You can switch tabs; status stays here.
+            </p>
           </div>
         </div>
       </div>

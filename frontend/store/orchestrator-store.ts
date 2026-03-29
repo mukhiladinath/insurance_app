@@ -394,6 +394,10 @@ async function _executeConfirm(
         pendingMissingFields: missingFields.slice(1),
         collectedOverrides: {},
         currentMissingField: firstField,
+        sessionToken:
+          typeof (data as { session_token?: string }).session_token === 'string'
+            ? (data as { session_token: string }).session_token
+            : undefined,
       };
 
       // Update step results display with prior completed steps
@@ -470,6 +474,25 @@ async function _executeConfirm(
         );
       }
 
+      const dashStep = executedResults.find((r) => r.tool_id === 'generate_insurance_dashboard' && r.status === 'completed');
+      const dashResult = dashStep?.result as { status?: string; dashboard?: { id?: string } } | undefined;
+      if (
+        clientId &&
+        dashResult?.status === 'complete' &&
+        dashResult.dashboard?.id &&
+        typeof window !== 'undefined'
+      ) {
+        window.dispatchEvent(
+          new CustomEvent('insurance-dashboard-created', {
+            detail: { clientId, dashboardId: dashResult.dashboard.id },
+          }),
+        );
+        useClientStore.getState().requestInsuranceDashboardView({
+          clientId,
+          dashboardId: dashResult.dashboard.id,
+        });
+      }
+
       const comparableDone = executedResults.filter(
         (r) => r.status === 'completed' && COMPARABLE_INSURANCE_TOOL_IDS.has(r.tool_id),
       );
@@ -520,6 +543,7 @@ function _resumeExecution(
         parameters: {
           ...step.parameters,
           _overrides: resume.collectedOverrides,
+          ...(resume.sessionToken ? { _session_token: resume.sessionToken } : {}),
         },
       };
     }

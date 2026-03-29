@@ -462,6 +462,17 @@ export default function FactFind({ clientFacts, scrollToSection }: Props) {
             window.dispatchEvent(
               new CustomEvent('client-analysis-outputs-changed', { detail: { clientId: activeClientId } }),
             );
+            if (autoResult.insurance_dashboard_id) {
+              window.dispatchEvent(
+                new CustomEvent('insurance-dashboard-created', {
+                  detail: { clientId: activeClientId, dashboardId: autoResult.insurance_dashboard_id },
+                }),
+              );
+              useClientStore.getState().requestInsuranceDashboardView({
+                clientId: activeClientId,
+                dashboardId: autoResult.insurance_dashboard_id,
+              });
+            }
           }
         } catch (autoErr) {
           console.error('Goals-based automation failed:', autoErr);
@@ -493,7 +504,9 @@ export default function FactFind({ clientFacts, scrollToSection }: Props) {
           Enter client information gathered during the fact find interview. Fields left blank are ignored.
           When you save non-empty{' '}
           <span className="font-medium text-slate-500">Goals &amp; objectives</span>, an LLM picks relevant
-          insurance engines, runs them, and saves one merged write-up under Saved analyses (tagged Automated).
+          insurance engines, runs them, saves one merged write-up under Saved analyses (tagged Automated), and
+          tries to create an insurance projection dashboard on the Dashboards tab when enough fields are
+          available.
         </p>
         <button
           onClick={handleSave}

@@ -81,13 +81,17 @@ export function describeAutomationResult(r: ObjectivesAutomationResult): {
 
   if (r.outputs_created > 0) {
     const ran = r.tools_run.map((id) => registryToolLabel(id)).join(' · ');
+    const lines = [
+      `Steps completed: ${ran}.`,
+      'A merged summary is in Saved analyses (look for the Automated tag).',
+    ];
+    if (r.insurance_dashboard_created && r.insurance_dashboard_id) {
+      lines.push('An insurance projection dashboard was created — open the Dashboards tab to review.');
+    }
     return {
       tone: 'success',
       title: 'Automated analysis finished',
-      lines: [
-        `Steps completed: ${ran}.`,
-        'A merged summary is in Saved analyses (look for the Automated tag).',
-      ],
+      lines,
     };
   }
 

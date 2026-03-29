@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import DESCENDING
 
 from app.db.collections import DOCUMENTS
 
@@ -73,6 +74,23 @@ class DocumentRepository:
         result = await self._col.insert_one(doc)
         doc["_id"] = result.inserted_id
         return _serialize(doc)
+
+    async def latest_conversation_id_for_client(self, client_id: str) -> str | None:
+        """
+        Most recent upload for this client that was tied to a conversation.
+        Used to sync factfind → conversation_memory when active_conversation is unset.
+        """
+        doc = await self._col.find_one(
+            {
+                "client_id": client_id,
+                "conversation_id": {"$nin": [None, ""]},
+            },
+            sort=[("created_at", DESCENDING)],
+        )
+        if not doc:
+            return None
+        cid = doc.get("conversation_id")
+        return str(cid) if cid else None
 
     async def get_by_id(self, doc_id: str) -> dict | None:
         """Fetch a document record by its string ObjectId."""

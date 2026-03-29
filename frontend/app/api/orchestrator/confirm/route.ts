@@ -87,6 +87,9 @@ export async function POST(req: NextRequest) {
         step.parameters,
         stepResults.map((r) => ({ result: r.result })),
       );
+      if (clientId && !resolvedParams.clientId) {
+        resolvedParams.clientId = clientId;
+      }
 
       const toolResult = await handler(resolvedParams, ctx);
 
@@ -106,6 +109,7 @@ export async function POST(req: NextRequest) {
           prior_step_results: stepResults, // results collected so far (before the paused step)
           steps,
           step_labels,
+          session_token: signal.session_token,
         });
       }
 

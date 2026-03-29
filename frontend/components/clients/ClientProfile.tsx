@@ -19,11 +19,20 @@ export default function ClientProfile() {
     loadDocuments,
   } = useClientStore();
 
-  const { pendingFactFindSection, clearFactFindRequest, requestFactFind, pendingInsuranceComparison } =
-    useClientStore();
+  const {
+    pendingFactFindSection,
+    clearFactFindRequest,
+    requestFactFind,
+    pendingInsuranceComparison,
+    pendingInsuranceDashboard,
+  } = useClientStore();
 
   const handlePreloadedComparisonConsumed = useCallback(() => {
     useClientStore.getState().clearInsuranceComparisonRequest();
+  }, []);
+
+  const handlePreloadedDashboardConsumed = useCallback(() => {
+    useClientStore.getState().clearInsuranceDashboardRequest();
   }, []);
 
   const handleRefresh = () => {
@@ -134,14 +143,25 @@ export default function ClientProfile() {
           <ClientInfoPanel
             workspace={activeWorkspace}
             documents={activeDocuments}
-            initialTab={pendingInsuranceComparison ? 'compare' : pendingFactFindSection ? 'factfind' : undefined}
+            initialTab={
+              pendingInsuranceDashboard
+                ? 'dashboards'
+                : pendingInsuranceComparison
+                  ? 'compare'
+                  : pendingFactFindSection
+                    ? 'factfind'
+                    : undefined
+            }
             factFindSection={pendingFactFindSection ?? undefined}
             onTabConsumed={() => {
               if (pendingInsuranceComparison) return;
+              if (pendingInsuranceDashboard) return;
               clearFactFindRequest();
             }}
             preloadedInsuranceComparison={pendingInsuranceComparison}
             onPreloadedComparisonConsumed={handlePreloadedComparisonConsumed}
+            preloadedInsuranceDashboard={pendingInsuranceDashboard}
+            onPreloadedDashboardConsumed={handlePreloadedDashboardConsumed}
             clientId={activeClientId}
           />
         )}

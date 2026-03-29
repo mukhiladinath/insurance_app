@@ -46,6 +46,10 @@ CLIENT_ANALYSIS_OUTPUTS = "client_analysis_outputs"
 # Saved insurance comparison sessions (structured compare results)
 INSURANCE_TOOL_COMPARISONS = "insurance_tool_comparisons"
 
+# Dynamic insurance dashboards + pending resume sessions
+CLIENT_INSURANCE_DASHBOARDS = "client_insurance_dashboards"
+INSURANCE_DASHBOARD_SESSIONS = "insurance_dashboard_sessions"
+
 
 # -------------------------------------------------------------------------
 # Index definitions
@@ -161,6 +165,19 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     # insurance_tool_comparisons — saved comparison results per client
     await db[INSURANCE_TOOL_COMPARISONS].create_index(
         [("client_id", ASCENDING), ("created_at", DESCENDING)]
+    )
+
+    # client_insurance_dashboards — persisted dashboard specs per client
+    await db[CLIENT_INSURANCE_DASHBOARDS].create_index(
+        [("client_id", ASCENDING), ("created_at", DESCENDING)]
+    )
+
+    # insurance_dashboard_sessions — resume tokens for missing-field flow
+    await db[INSURANCE_DASHBOARD_SESSIONS].create_index(
+        [("session_token", ASCENDING)], unique=True
+    )
+    await db[INSURANCE_DASHBOARD_SESSIONS].create_index(
+        [("client_id", ASCENDING), ("status", ASCENDING)]
     )
 
     logger.info("MongoDB indexes ensured.")
