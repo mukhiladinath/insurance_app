@@ -21,7 +21,11 @@ from app.core.config import get_settings
 from app.db import mongo
 from app.db.collections import ensure_indexes
 from app.agents.graph import get_graph
-from app.api.routes import health, chat, conversations, tools, upload, soa
+from app.agents.orchestrator_graph import get_orchestrator_graph
+from app.agents.workspace_graph import get_workspace_graph
+from app.api.routes import health, chat, conversations, tools, upload, soa, agent
+from app.api.routes import clients, workspace
+from app.api.routes import client_context, orchestrator_planner, client_analysis_outputs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,8 +49,10 @@ async def lifespan(app: FastAPI):
     db = mongo.get_db()
     await ensure_indexes(db)
 
-    # Pre-compile the LangGraph graph (catches config errors early)
+    # Pre-compile all LangGraph graphs (catches config errors early)
     get_graph()
+    get_orchestrator_graph()
+    get_workspace_graph()
 
     logger.info("Backend startup complete.")
     yield
@@ -92,6 +98,16 @@ def create_app() -> FastAPI:
     app.include_router(tools.router, prefix=prefix)
     app.include_router(upload.router, prefix=prefix)
     app.include_router(soa.router, prefix=prefix)
+    app.include_router(agent.router, prefix=prefix)
+
+    # New client-workspace-centric routes
+    app.include_router(clients.router, prefix=prefix)
+    app.include_router(workspace.router, prefix=prefix)
+
+    # AI memory + finobi-style orchestrator planner
+    app.include_router(client_context.router, prefix=prefix)
+    app.include_router(orchestrator_planner.router, prefix=prefix)
+    app.include_router(client_analysis_outputs.router, prefix=prefix)
 
     return app
 

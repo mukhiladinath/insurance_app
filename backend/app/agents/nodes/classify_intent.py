@@ -195,7 +195,6 @@ _TPD_ASSESSMENT_COMPOUND_RIGHT = [
 _TPD_IN_SUPER_KEYWORDS = [
     "tpd in super", "tpd inside super", "tpd inside superannuation", "tpd super fund",
     "tpd insurance in super", "tpd insurance inside super", "analyse tpd insurance in super",
-    "analyze tpd insurance in super",
     "tpd group cover", "group tpd", "super tpd cover", "tpd default cover",
     "tpd switch off", "tpd inactivity", "tpd low balance", "tpd under 25",
     "tpd election", "tpd opt in", "retain tpd super", "purchase tpd super",

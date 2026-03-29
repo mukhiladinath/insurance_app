@@ -233,6 +233,7 @@ Schema (all fields optional — omit if not found):
     "family_history": null
   },
   "goals": {
+    "goals_and_objectives": null,
     "primary_goal": null,
     "risk_tolerance": null,
     "retirement_age": null,
@@ -250,6 +251,7 @@ Rules:
 - Set numeric fields as numbers (not strings): age=42, annual_income=120000
 - Set boolean fields as true/false
 - List fields: use [] if none found, or a list of strings
+- goals.goals_and_objectives: use a single string for narrative goals/objectives/risk profile text when the document states them (SOA "Objectives", fact find prose, adviser notes); omit if not present
 - _meta.document_type: classify as one of: "policy_schedule", "soa", "client_profile", "medical_report", "payslip", "tax_return", "other"
 - _meta.confidence_note: brief note on extraction quality (e.g. "clear SOA with full client details")
 - Omit any top-level section entirely if no fields within it were found

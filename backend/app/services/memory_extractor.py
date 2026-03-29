@@ -131,6 +131,7 @@ Return this JSON structure (omit empty sections):
     "hazardous_activities": [<string>]
   },
   "goals": {
+    "goals_and_objectives": <string — free text: client's stated goals, objectives, priorities, time horizon, risk attitude, verbatim or paraphrased from the message when clearly stated>,
     "wants_replacement": <true|false>,
     "wants_retention": <true|false>,
     "affordability_is_concern": <true|false>,
@@ -199,6 +200,7 @@ def _summarise_known_facts(memory: dict) -> str:
             "medical_conditions": "medical_conditions",
         },
         "goals": {
+            "goals_and_objectives": "goals_and_objectives",
             "wants_replacement": "wants_replacement",
             "wants_retention": "wants_retention",
             "affordability_is_concern": "affordability_is_concern",

@@ -83,3 +83,65 @@ class AgentState(TypedDict, total=False):
     # Error tracking
     # -------------------------------------------------------------------------
     errors: list[str]
+
+    # =========================================================================
+    # Orchestrator fields (populated when running in orchestrator mode)
+    # =========================================================================
+
+    # Flag: True when the new orchestrator graph is running instead of the
+    # legacy single-tool graph.
+    orchestrator_mode: bool
+
+    # ---- Dynamic context requirements (set by assess_context node) ----
+    # Drives all smart loading nodes — what to load and how much.
+    # Schema:
+    #   message_history_depth: int       — number of recent messages to load
+    #   memory_sections:       list[str] — client_facts sections to load fully
+    #   load_advisory_notes:   bool
+    #   load_documents:        bool
+    #   load_scratch_pad:      bool
+    #   reasoning:             str       — logged explanation
+    context_requirements: dict
+
+    # ---- Advisory memory (set by load_memory_smart when load_advisory_notes=True) ----
+    # Structured conclusions from prior tool runs (keyed by tool_name).
+    # Injected into the planning prompt so the planner knows what was decided.
+    advisory_notes: dict
+
+    # ---- Scratch pad (set by load_memory_smart, always loaded) ----
+    # Agent working notes from prior runs (lightweight list of dicts).
+    scratch_pad_entries: list[dict]
+
+    # ---- Planning ----
+    # List of PlanStep dicts produced by the plan_node.
+    # Schema per step:
+    #   step_id: str             — "step_1", "step_2", …
+    #   tool_name: str           — registered tool name OR "direct_response"
+    #   description: str         — human-readable description of what the step does
+    #   inputs: dict             — pre-populated inputs; may contain {{step_N.field}} refs
+    #   depends_on: list[str]    — step_ids that must complete before this step runs
+    #   rationale: str           — why this step is in the plan
+    plan_steps: list[dict]
+
+    # True when the planner cannot proceed due to missing critical information.
+    clarification_needed: bool
+
+    # The natural-language question to ask the user when clarification_needed is True.
+    clarification_question: str | None
+
+    # List of memory field paths the planner identified as missing (e.g. "personal.age").
+    missing_context: list[str]
+
+    # ---- Execution ----
+    # List of StepResult dicts built during execute_steps.
+    # Schema per result:
+    #   step_id: str
+    #   tool_name: str
+    #   status: str              — "completed" | "failed" | "skipped"
+    #   output: dict | None
+    #   data_card: dict | None   — structured UI card
+    #   error: str | None
+    step_results: list[dict]
+
+    # Structured UI cards extracted from all successful step results.
+    data_cards: list[dict]

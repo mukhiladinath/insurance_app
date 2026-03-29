@@ -124,6 +124,36 @@ class ConversationMemoryRepository:
         )
         return _serialize(result)
 
+    async def patch_facts(self, conversation_id: str, sections: dict) -> None:
+        """
+        Patch specific fields in client_facts without touching other memory.
+
+        Args:
+            conversation_id: Target conversation.
+            sections: Dict of {section_name: {field: value, ...}}.
+                      A value of None means unset that field.
+        """
+        set_ops: dict = {"updated_at": utc_now()}
+        unset_ops: dict = {}
+
+        for section, fields in sections.items():
+            for field, value in fields.items():
+                key = f"client_facts.{section}.{field}"
+                if value is None:
+                    unset_ops[key] = ""
+                else:
+                    set_ops[key] = value
+
+        update: dict = {"$set": set_ops}
+        if unset_ops:
+            update["$unset"] = unset_ops
+
+        await self._col.update_one(
+            {"conversation_id": conversation_id},
+            update,
+            upsert=True,
+        )
+
     async def increment_turn_count(self, conversation_id: str) -> None:
         """Increment turn_count by 1. Called from update_memory node."""
         await self._col.update_one(

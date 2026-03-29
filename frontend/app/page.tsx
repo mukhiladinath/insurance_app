@@ -1,5 +1,5 @@
-import { ChatLayout } from '@/components/ChatLayout';
+import AppShell from '@/components/layout/AppShell';
 
 export default function Page() {
-  return <ChatLayout />;
+  return <AppShell />;
 }

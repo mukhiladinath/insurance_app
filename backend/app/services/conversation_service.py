@@ -16,11 +16,20 @@ class ConversationService:
         self._msg_repo = MessageRepository(db)
 
     async def get_or_create_conversation(
-        self, user_id: str, conversation_id: str | None, first_message: str | None = None
+        self,
+        user_id: str,
+        conversation_id: str | None,
+        first_message: str | None = None,
+        title: str | None = None,
     ) -> dict:
         """
         If conversation_id is provided, load and return it.
-        Otherwise create a new conversation with an auto-generated title.
+        Otherwise create a new conversation.
+
+        Title precedence for new conversations:
+          1. Explicit `title` param (client name entered by the user)
+          2. Auto-generated from first_message (truncated at 60 chars)
+          3. DEFAULT_CONVERSATION_TITLE fallback
         """
         if conversation_id:
             conv = await self._conv_repo.get_by_id(conversation_id)
@@ -28,14 +37,12 @@ class ConversationService:
                 raise ValueError(f"Conversation '{conversation_id}' not found.")
             return conv
 
-        # Auto-generate title from first message (truncate at 60 chars)
-        title = DEFAULT_CONVERSATION_TITLE
-        if first_message:
+        if not title and first_message:
             title = first_message[:60].strip()
             if len(first_message) > 60:
                 title += "…"
 
-        return await self._conv_repo.create(user_id=user_id, title=title)
+        return await self._conv_repo.create(user_id=user_id, title=title or DEFAULT_CONVERSATION_TITLE)
 
     async def list_conversations(
         self, user_id: str, limit: int = 50, skip: int = 0

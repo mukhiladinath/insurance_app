@@ -81,6 +81,7 @@ async def upload_document(
     file:            UploadFile = File(...),
     user_id:         str        = Form(...),
     conversation_id: str | None = Form(default=None),
+    client_id:       str | None = Form(default=None),
 ):
     """
     Upload a document, extract its text and client facts, persist to DB.
@@ -152,6 +153,7 @@ async def upload_document(
 
     doc_record = await doc_repo.create(
         user_id=user_id,
+        client_id=client_id,
         conversation_id=conversation_id,
         filename=safe_filename,
         content_type=content_type,

@@ -4,6 +4,7 @@ document_repository.py — MongoDB repository for uploaded document records.
 Document schema:
   _id              : ObjectId (used as storage_ref on the frontend)
   user_id          : str
+  client_id        : str | None  (set when uploading from a client profile / workspace)
   conversation_id  : str | None  (None if uploaded before first message)
   filename         : str
   content_type     : str
@@ -45,6 +46,7 @@ class DocumentRepository:
         self,
         *,
         user_id: str,
+        client_id: str | None = None,
         conversation_id: str | None,
         filename: str,
         content_type: str,
@@ -57,6 +59,7 @@ class DocumentRepository:
         now = datetime.now(timezone.utc)
         doc = {
             "user_id":         user_id,
+            "client_id":       client_id,
             "conversation_id": conversation_id,
             "filename":        filename,
             "content_type":    content_type,
@@ -85,6 +88,26 @@ class DocumentRepository:
             {"conversation_id": conversation_id}
         ).sort("created_at", 1)
         docs = await cursor.to_list(length=100)
+        return [_serialize(d) for d in docs]
+
+    async def list_for_client(
+        self,
+        client_id: str,
+        user_id: str,
+        conversation_id: str | None,
+    ) -> list[dict]:
+        """
+        Documents visible for a client workspace: tagged with client_id and/or
+        linked to the active conversation (same advisor user_id).
+        """
+        clauses: list[dict] = [{"client_id": client_id}]
+        if conversation_id:
+            clauses.append({"conversation_id": conversation_id})
+        cursor = (
+            self._col.find({"user_id": user_id, "$or": clauses})
+            .sort("created_at", 1)
+        )
+        docs = await cursor.to_list(length=200)
         return [_serialize(d) for d in docs]
 
     async def list_unlinked_by_user(self, user_id: str) -> list[dict]:

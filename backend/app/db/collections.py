@@ -23,6 +23,25 @@ APP_CONFIG = "app_config"
 CONVERSATION_MEMORY = "conversation_memory"
 MEMORY_EVENTS = "memory_events"
 DOCUMENTS = "documents"          # uploaded document records + extracted content
+AGENT_WORKSPACE = "agent_workspace"  # advisory_notes + scratch_pad per conversation
+
+# ── New client-workspace-centric collections ──────────────────────────────────
+
+CLIENTS = "clients"                          # canonical client identity records
+FACTFINDS = "factfinds"                      # first-class factfind per client
+FACTFIND_CHANGE_LOG = "factfind_change_log"  # per-field audit trail
+CLIENT_WORKSPACES = "client_workspaces"      # workspace state, advisory notes, overrides
+WORKSPACE_CONTEXT_SNAPSHOTS = "workspace_context_snapshots"  # what the agent saw per run
+RUN_STEPS = "run_steps"                      # full per-step results (replaces tool_calls for new runs)
+SAVED_TOOL_RUNS = "saved_tool_runs"          # curated, named tool run snapshots per client
+PENDING_CLARIFICATIONS = "pending_clarifications"  # frozen plan + resume token
+DOCUMENT_EXTRACTIONS = "document_extractions"      # extracted text + field proposals
+
+# ── AI memory system ──────────────────────────────────────────────────────────
+CLIENT_MEMORIES = "client_memories"   # per-client per-category markdown memory docs
+
+# Persisted LLM summaries from orchestrator analysis tool runs (per client)
+CLIENT_ANALYSIS_OUTPUTS = "client_analysis_outputs"
 
 
 # -------------------------------------------------------------------------
@@ -74,5 +93,66 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     )
     await db[DOCUMENTS].create_index([("user_id", ASCENDING)])
     await db[DOCUMENTS].create_index([("facts_merged", ASCENDING)])
+
+    # agent_workspace — advisory notes + scratch pad, unique per conversation
+    await db[AGENT_WORKSPACE].create_index(
+        [("conversation_id", ASCENDING)], unique=True
+    )
+
+    # ── New workspace collections ─────────────────────────────────────────────
+
+    # clients — one record per client
+    await db[CLIENTS].create_index([("user_id", ASCENDING), ("status", ASCENDING)])
+    await db[CLIENTS].create_index([("name", ASCENDING)])
+
+    # factfinds — unique per client
+    await db[FACTFINDS].create_index([("client_id", ASCENDING)], unique=True)
+
+    # factfind_change_log — per-client audit trail ordered by time
+    await db[FACTFIND_CHANGE_LOG].create_index(
+        [("client_id", ASCENDING), ("changed_at", DESCENDING)]
+    )
+    await db[FACTFIND_CHANGE_LOG].create_index([("field_path", ASCENDING)])
+
+    # client_workspaces — unique per client
+    await db[CLIENT_WORKSPACES].create_index([("client_id", ASCENDING)], unique=True)
+    await db[CLIENT_WORKSPACES].create_index([("user_id", ASCENDING)])
+
+    # workspace_context_snapshots — ordered per client
+    await db[WORKSPACE_CONTEXT_SNAPSHOTS].create_index(
+        [("client_id", ASCENDING), ("created_at", DESCENDING)]
+    )
+    await db[WORKSPACE_CONTEXT_SNAPSHOTS].create_index([("run_id", ASCENDING)])
+
+    # run_steps — ordered per run and searchable per client
+    await db[RUN_STEPS].create_index([("run_id", ASCENDING)])
+    await db[RUN_STEPS].create_index([("client_id", ASCENDING), ("tool_name", ASCENDING)])
+
+    # saved_tool_runs — per client, ordered by save time
+    await db[SAVED_TOOL_RUNS].create_index(
+        [("client_id", ASCENDING), ("saved_at", DESCENDING)]
+    )
+    await db[SAVED_TOOL_RUNS].create_index([("tool_names", ASCENDING)])
+
+    # pending_clarifications — resume_token must be unique; status lookup
+    await db[PENDING_CLARIFICATIONS].create_index([("resume_token", ASCENDING)], unique=True)
+    await db[PENDING_CLARIFICATIONS].create_index(
+        [("client_id", ASCENDING), ("status", ASCENDING)]
+    )
+
+    # document_extractions — one per document
+    await db[DOCUMENT_EXTRACTIONS].create_index([("document_id", ASCENDING)], unique=True)
+    await db[DOCUMENT_EXTRACTIONS].create_index([("client_id", ASCENDING)])
+
+    # client_memories — one doc per client per category (9 categories per client)
+    await db[CLIENT_MEMORIES].create_index(
+        [("client_id", ASCENDING), ("category", ASCENDING)], unique=True
+    )
+    await db[CLIENT_MEMORIES].create_index([("client_id", ASCENDING)])
+
+    # client_analysis_outputs — history of analysis narratives per client
+    await db[CLIENT_ANALYSIS_OUTPUTS].create_index(
+        [("client_id", ASCENDING), ("created_at", DESCENDING)]
+    )
 
     logger.info("MongoDB indexes ensured.")
